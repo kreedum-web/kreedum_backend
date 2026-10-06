@@ -6,7 +6,7 @@ const connectDatabase = require("./src/config/database");
 
 const PORT = process.env.PORT || 5000;
 
-console.log("ENV URI:", process.env.MONGODB_URI);
+// console.log(":", process.env.MONGODB_URI);
 
 async function startServer() {
   await connectDatabase();
