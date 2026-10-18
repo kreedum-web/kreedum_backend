@@ -115,6 +115,11 @@ router.get("/me", authMiddleware, authController.getProfile);
  *               phone:
  *                 type: string
  *                 example: "9999999999"
+ *               birthday:
+ *                 type: string
+ *                 format: date
+ *                 nullable: true
+ *                 example: "1995-08-13"
  *     responses:
  *       200:
  *         description: Profile updated successfully.
