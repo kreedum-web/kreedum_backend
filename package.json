@@ -11,7 +11,8 @@
     "migrate:brands": "node src/migration/migrateBrands.js",
     "migrate:indexes": "node src/migration/createIndexes.js",
     "migrate:normalize-brands": "node src/migration/normalizeBrands.js",
-    "migrate:enrich-products": "node src/migration/enrichProducts.js"
+    "migrate:enrich-products": "node src/migration/enrichProducts.js",
+    "rebuild:catalog": "node src/migration/rebuildCatalog.js"
   },
   "keywords": [],
   "author": "",
