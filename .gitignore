@@ -5,3 +5,4 @@ coverage
 .DS_Store
 .vscode
 npm-debug.log*
+rebuild-report.json
