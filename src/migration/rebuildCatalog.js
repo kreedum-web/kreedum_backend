@@ -49,6 +49,16 @@ const DEFAULT_AVAILABILITY = "Contact Kreedum Sports for product availability.";
 // PURE PLANNING (no database) — exported for testing
 // ===================================================================
 
+/** Meta description: up to ~160 characters, cut at a sentence or word, never mid-word. */
+function seoDescription(text = "") {
+  const clean = String(text).replace(/\s+/g, " ").trim();
+  if (clean.length <= 160) return clean;
+  const sentenceEnd = clean.slice(0, 160).search(/[.!?][^.!?]*$/);
+  if (sentenceEnd > 80) return clean.slice(0, sentenceEnd + 1);
+  const cut = clean.slice(0, 157);
+  return cut.slice(0, cut.lastIndexOf(" ")) + "…";
+}
+
 const leafSlug = (slug = "") => String(slug || "").replace(/\/+$/, "").split("/").pop();
 
 function buildCategoryDocs(supplierCategories) {
@@ -168,7 +178,7 @@ function buildProduct(sp, tree, existing, usedSlugs, issues) {
       searchKeywords,
       seo: {
         title: `${name} | Kreedum Sports Lucknow`,
-        description: descriptionText.replace(/\s+/g, " ").slice(0, 155) || `${name} available at Kreedum Sports Lucknow.`,
+        description: seoDescription(sp.shortDescription || descriptionText) || `${name} available at Kreedum Sports Lucknow.`,
         keywords: searchKeywords,
       },
 
