@@ -1,5 +1,6 @@
 const Category = require('../models/Category');
 const Product = require('../models/Product');
+const getCatalogImages = require('../utils/catalogImages');
 
 
 class CategoryService {
@@ -7,9 +8,12 @@ class CategoryService {
   // Same order as the Metro Sports menu (displayOrder), with product counts
   // so the website can hide empty categories.
   async getCategoryTree() {
-    const categories = await Category.find({ isActive: { $ne: false } })
-      .sort({ level: 1, displayOrder: 1, name: 1 })
-      .lean();
+    const [categories, images] = await Promise.all([
+      Category.find({ isActive: { $ne: false } })
+        .sort({ level: 1, displayOrder: 1, name: 1 })
+        .lean(),
+      getCatalogImages(),
+    ]);
 
     const node = (category, children) => ({
       _id: category._id,
@@ -17,6 +21,8 @@ class CategoryService {
       slug: category.slug,
       level: category.level,
       productCount: category.productCount || 0,
+      // a product photo from this category, for category tiles
+      image: category.image || images.byCategory.get(category.slug) || "",
       ...(children ? { children } : {}),
     });
 

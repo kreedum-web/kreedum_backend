@@ -15,7 +15,7 @@ class HomepageService {
         subtitle: "Official Aerofit Channel Partner in Lucknow",
         image: "/banners/aerofit-premium.jpg",
         buttonText: "Shop Aerofit",
-        buttonLink: "/products?brand=aerofit",
+        buttonLink: "/brands/aerofit",
       },
       {
         id: 2,

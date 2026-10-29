@@ -1,12 +1,15 @@
 const Brand = require('../models/Brand');
 const Product = require('../models/Product');
+const Category = require('../models/Category');
+const getCatalogImages = require('../utils/catalogImages');
 
 class BrandService {
   // Get all brands with product counts
   async getAllBrands() {
-    const brands = await Brand.find({})
-      .sort({ name: 1 })
-      .lean();
+    const [brands, images] = await Promise.all([
+      Brand.find({}).sort({ name: 1 }).lean(),
+      getCatalogImages(),
+    ]);
 
     const brandsWithCounts = await Promise.all(
       brands.map(async (brand) => {
@@ -19,6 +22,8 @@ class BrandService {
         return {
           ...brand,
           productCount,
+          // a product photo, for brand cards when there's no logo
+          image: brand.logo || images.byBrand.get(brand.slug) || '',
         };
       })
     );
@@ -54,9 +59,51 @@ class BrandService {
       }),
     };
 
+    // Which departments / categories this brand has products in, with counts,
+    // in the website menu order — for the brand page's category filter.
+    const [products, categoryDocs] = await Promise.all([
+      Product.find(
+        { brandSlug: slug, visibility: 'published', isActive: true },
+        { department: 1, parentCategory: 1 }
+      ).lean(),
+      Category.find({ level: { $in: [1, 2] } }, { slug: 1, name: 1, level: 1, displayOrder: 1 }).lean(),
+    ]);
+
+    const info = new Map(categoryDocs.map((c) => [c.slug, c]));
+    const departments = new Map();
+
+    for (const product of products) {
+      if (!info.has(product.department)) continue;
+      if (!departments.has(product.department)) {
+        departments.set(product.department, { productCount: 0, categories: new Map() });
+      }
+      const dept = departments.get(product.department);
+      dept.productCount++;
+      if (info.has(product.parentCategory)) {
+        dept.categories.set(product.parentCategory, (dept.categories.get(product.parentCategory) || 0) + 1);
+      }
+    }
+
+    const byMenuOrder = (a, b) => (info.get(a.slug).displayOrder || 0) - (info.get(b.slug).displayOrder || 0);
+
+    const categories = [...departments]
+      .map(([deptSlug, dept]) => ({
+        slug: deptSlug,
+        name: info.get(deptSlug).name,
+        productCount: dept.productCount,
+        children: [...dept.categories]
+          .map(([catSlug, productCount]) => ({ slug: catSlug, name: info.get(catSlug).name, productCount }))
+          .sort(byMenuOrder),
+      }))
+      .sort(byMenuOrder);
+
+    const images = await getCatalogImages();
+
     return {
       ...brand,
+      image: brand.logo || images.byBrand.get(brand.slug) || '',
       stats,
+      categories,
     };
   }
 
