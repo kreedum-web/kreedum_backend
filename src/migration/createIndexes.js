@@ -10,6 +10,7 @@ const Wishlist = require("../models/Wishlist");
 const Cart = require("../models/Cart");
 const Order = require("../models/Order");
 const Address = require("../models/Address");
+const ensureCartIndexes = require("../utils/ensureCartIndexes");
 
 /**
  * Safely create an index.
@@ -178,14 +179,8 @@ await safeCreateIndex(
 // CART
 // ===========================
 
-await safeCreateIndex(
-  Cart.collection,
-  { user: 1, product: 1 },
-  {
-    unique: true,
-    name: "cart_user_product_unique",
-  }
-);
+// One line per product + option; replaces the old per-product index.
+await ensureCartIndexes();
 
 await safeCreateIndex(
   Cart.collection,

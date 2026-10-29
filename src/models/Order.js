@@ -23,10 +23,24 @@ const orderItemSchema = new mongoose.Schema(
 
     sku: String,
 
+    // Chosen option of a product sold in several weights / sizes,
+    // e.g. variantLabel "Weight: 5 kg". Empty for products without options.
+    variantId: {
+      type: String,
+      default: "",
+    },
+
+    variantLabel: {
+      type: String,
+      default: "",
+    },
+
     price: {
       type: Number,
       required: true,
     },
+
+    mrp: Number,
 
     quantity: {
       type: Number,

@@ -1,5 +1,9 @@
 const cartService = require("../services/cartService");
 
+// Chosen option (weight, size …) of the cart line: body for add / update,
+// ?variant= for remove (DELETE requests usually have no body).
+const variantOf = (req) => String(req.body?.variantId ?? req.query?.variant ?? "");
+
 class CartController {
 
   // GET /cart
@@ -28,7 +32,8 @@ class CartController {
       const cartItem = await cartService.addToCart(
         req.user._id,
         req.params.productId,
-        Number(quantity)
+        Number(quantity),
+        variantOf(req)
       );
 
       return res.status(201).json({
@@ -52,7 +57,8 @@ class CartController {
       const cartItem = await cartService.updateQuantity(
         req.user._id,
         req.params.productId,
-        Number(quantity)
+        Number(quantity),
+        variantOf(req)
       );
 
       return res.status(200).json({
@@ -73,7 +79,8 @@ class CartController {
     try {
       await cartService.removeFromCart(
         req.user._id,
-        req.params.productId
+        req.params.productId,
+        variantOf(req)
       );
 
       return res.status(200).json({

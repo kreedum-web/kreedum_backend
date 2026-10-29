@@ -2,6 +2,7 @@ const generateSlug = require("./generateSlug");
 const generateKeywords = require("./generateKeywords");
 const resolveCategory = require("./categoryResolver");
 const extractSpecifications = require("./extractSpecifications");
+const { variantsFromSupplier } = require("./productVariants");
 
 /**
  * Convert Metro Sports product into Kreedum ecommerce product.
@@ -63,6 +64,9 @@ function transformProduct(product) {
     mrp: product.mrp || 0,
     sellingPrice: product.sellingPrice || product.mrp || 0,
     discountPercent,
+
+    // Weight / size options, each with its own price.
+    ...variantsFromSupplier(product, product.sellingPrice || product.mrp || 0),
 
     thumbnail: product.thumbnail || product.images?.[0] || "",
     images: product.images || [],

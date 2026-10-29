@@ -1,5 +1,30 @@
 const mongoose = require("mongoose");
 
+// Option of a product sold in several versions, e.g. { name: "Weight", values: ["2.5 kg", "5 kg"] }.
+const productOptionSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    values: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
+// One sellable version: { Weight: "5 kg" } at its own price.
+// variantId is the supplier's id for it, stable across catalogue rebuilds.
+const productVariantSchema = new mongoose.Schema(
+  {
+    variantId: { type: String, required: true },
+    options: { type: mongoose.Schema.Types.Mixed, default: {} },
+    label: { type: String, default: "" },
+    sku: { type: String, default: "" },
+    mrp: { type: Number, default: 0 },
+    sellingPrice: { type: Number, required: true },
+    inStock: { type: Boolean, default: true },
+    image: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const productSchema = new mongoose.Schema(
   {
     // =====================================================
@@ -108,6 +133,31 @@ const productSchema = new mongoose.Schema(
     discountPercent: {
       type: Number,
       default: 0,
+    },
+
+    // Products sold in several weights / sizes: sellingPrice and mrp above
+    // are the cheapest option, maxPrice the most expensive ("₹499 – ₹13,499").
+    // Equal to sellingPrice for products without options.
+    maxPrice: {
+      type: Number,
+      default: 0,
+    },
+
+    // =====================================================
+    // OPTIONS (weight, size …)
+    // =====================================================
+
+    // [{ name: "Weight", values: ["2.5 kg", "5 kg"] }] — in display order.
+    options: {
+      type: [productOptionSchema],
+      default: [],
+    },
+
+    // One per option combination, each with its own price. The customer must
+    // pick one; carts and orders store its variantId.
+    variants: {
+      type: [productVariantSchema],
+      default: [],
     },
 
     // =====================================================

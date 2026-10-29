@@ -50,6 +50,10 @@ router.get("/", authMiddleware, cartController.getCart);
  *               quantity:
  *                 type: integer
  *                 example: 2
+ *               variantId:
+ *                 type: string
+ *                 description: Chosen option (weight, size …). Required for products with options.
+ *                 example: "7027"
  *     responses:
  *       201:
  *         description: Product added successfully.
@@ -83,6 +87,9 @@ router.post("/:productId", authMiddleware, cartController.addToCart);
  *               quantity:
  *                 type: integer
  *                 example: 3
+ *               variantId:
+ *                 type: string
+ *                 description: Option of the cart line to update ("" or omitted for products without options).
  *     responses:
  *       200:
  *         description: Cart quantity updated.
@@ -104,6 +111,12 @@ router.patch("/:productId", authMiddleware, cartController.updateQuantity);
  *         schema:
  *           type: string
  *         example: 68aa507292eba10c8a50b14f
+ *       - in: query
+ *         name: variant
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Option of the cart line to remove (products with options).
  *     responses:
  *       200:
  *         description: Product removed successfully.

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Cart = require("../models/Cart");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
+const { findVariant, hasVariants, pricing } = require("../utils/productVariants");
 
 const MAX_CART_QUANTITY = 5;
 
@@ -42,12 +43,22 @@ class OrderService {
           throw new Error("Maximum quantity exceeded.");
         }
 
-        const price =
-          product.sellingPrice ??
-          product.salePrice ??
-          product.price ??
-          0;
+        // Products sold in several weights / sizes are charged at the
+        // chosen option's price, never the product's "from" price.
+        const variant = findVariant(product, cartItem.variantId);
 
+        if (hasVariants(product) ? !variant : cartItem.variantId) {
+          throw new Error(
+            `Please choose an option again for ${product.name}: the one in your cart is no longer available.`
+          );
+        }
+
+        if (variant && variant.inStock === false) {
+          throw new Error(`${product.name} (${variant.label}) is out of stock.`);
+        }
+
+        const unit = pricing(product, variant);
+        const price = unit.sellingPrice;
         const total = price * cartItem.quantity;
 
         subtotal += total;
@@ -57,9 +68,12 @@ class OrderService {
           name: product.name,
           slug: product.slug,
           brand: product.brand,
-          thumbnail: product.thumbnail,
-          sku: product.sku,
+          thumbnail: unit.thumbnail,
+          sku: unit.sku,
+          variantId: variant ? variant.variantId : "",
+          variantLabel: unit.variantLabel,
           price,
+          mrp: unit.mrp,
           quantity: cartItem.quantity,
           total,
         });

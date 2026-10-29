@@ -41,6 +41,7 @@ const Brand = require("../models/Brand");
 const generateSlug = require("../utils/generateSlug");
 const generateKeywords = require("../utils/generateKeywords");
 const extractSpecifications = require("../utils/extractSpecifications");
+const { variantsFromSupplier } = require("../utils/productVariants");
 
 const SUPPLIER = "metrosports";
 const DEFAULT_AVAILABILITY = "Contact Kreedum Sports for product availability.";
@@ -117,6 +118,10 @@ function buildProduct(sp, tree, existing, usedSlugs, issues) {
   const features = sp.features || [];
   const { specifications, highlights } = extractSpecifications(features);
 
+  // Weight / size options, each with its own price (the scraper's sellingPrice
+  // is already the cheapest one).
+  const { options, variants, maxPrice } = variantsFromSupplier(sp, sellingPrice);
+
   const categoryWords = categoryPath.map((slug) => tree.get(slug)?.name).filter(Boolean);
   const searchKeywords = [
     ...new Set([
@@ -159,6 +164,10 @@ function buildProduct(sp, tree, existing, usedSlugs, issues) {
       mrp,
       sellingPrice,
       discountPercent,
+      maxPrice,
+
+      options,
+      variants,
 
       thumbnail: sp.thumbnail || sp.images?.[0] || "",
       images: sp.images || [],
@@ -269,6 +278,7 @@ function planRebuild({ supplierCategories, supplierProducts, existingProducts = 
       emptyCategories: categories.filter((c) => !categoryCounts.get(c.slug)).map((c) => c.slug),
       staleCategories,
       products: products.length,
+      productsWithOptions: products.filter((p) => p.update.$set.variants.length).length,
       newProducts: products.filter((p) => !p.existing).length,
       visibleProducts: visible.length,
       hiddenProducts: products.length - visible.length,

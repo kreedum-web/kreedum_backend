@@ -1,0 +1,676 @@
+diff --git a/server.js b/server.js
+index 1ff9faa..91ccb3c 100644
+--- a/server.js
++++ b/server.js
+@@ -3,6 +3,7 @@ require("./src/config/bootstrap");
+ require("dotenv").config();
+ const app = require("./src/app");
+ const connectDatabase = require("./src/config/database");
++const ensureCartIndexes = require("./src/utils/ensureCartIndexes");
+ 
+ const PORT = process.env.PORT || 5000;
+ 
+@@ -10,6 +11,7 @@ const PORT = process.env.PORT || 5000;
+ 
+ async function startServer() {
+   await connectDatabase();
++  await ensureCartIndexes();
+ 
+   app.listen(PORT, () => {
+     console.log(`🚀 Kreedum API running on port ${PORT}`);
+diff --git a/src/controllers/cartController.js b/src/controllers/cartController.js
+index 7dd4184..028f488 100644
+--- a/src/controllers/cartController.js
++++ b/src/controllers/cartController.js
+@@ -1,5 +1,9 @@
+ const cartService = require("../services/cartService");
+ 
++// Chosen option (weight, size …) of the cart line: body for add / update,
++// ?variant= for remove (DELETE requests usually have no body).
++const variantOf = (req) => String(req.body?.variantId ?? req.query?.variant ?? "");
++
+ class CartController {
+ 
+   // GET /cart
+@@ -28,7 +32,8 @@ class CartController {
+       const cartItem = await cartService.addToCart(
+         req.user._id,
+         req.params.productId,
+-        Number(quantity)
++        Number(quantity),
++        variantOf(req)
+       );
+ 
+       return res.status(201).json({
+@@ -52,7 +57,8 @@ class CartController {
+       const cartItem = await cartService.updateQuantity(
+         req.user._id,
+         req.params.productId,
+-        Number(quantity)
++        Number(quantity),
++        variantOf(req)
+       );
+ 
+       return res.status(200).json({
+@@ -73,7 +79,8 @@ class CartController {
+     try {
+       await cartService.removeFromCart(
+         req.user._id,
+-        req.params.productId
++        req.params.productId,
++        variantOf(req)
+       );
+ 
+       return res.status(200).json({
+diff --git a/src/migration/createIndexes.js b/src/migration/createIndexes.js
+index 6d08947..802c9fa 100644
+--- a/src/migration/createIndexes.js
++++ b/src/migration/createIndexes.js
+@@ -10,6 +10,7 @@ const Wishlist = require("../models/Wishlist");
+ const Cart = require("../models/Cart");
+ const Order = require("../models/Order");
+ const Address = require("../models/Address");
++const ensureCartIndexes = require("../utils/ensureCartIndexes");
+ 
+ /**
+  * Safely create an index.
+@@ -178,14 +179,8 @@ await safeCreateIndex(
+ // CART
+ // ===========================
+ 
+-await safeCreateIndex(
+-  Cart.collection,
+-  { user: 1, product: 1 },
+-  {
+-    unique: true,
+-    name: "cart_user_product_unique",
+-  }
+-);
++// One line per product + option; replaces the old per-product index.
++await ensureCartIndexes();
+ 
+ await safeCreateIndex(
+   Cart.collection,
+diff --git a/src/migration/rebuildCatalog.js b/src/migration/rebuildCatalog.js
+index 424a425..b3d0062 100644
+--- a/src/migration/rebuildCatalog.js
++++ b/src/migration/rebuildCatalog.js
+@@ -41,6 +41,7 @@ const Brand = require("../models/Brand");
+ const generateSlug = require("../utils/generateSlug");
+ const generateKeywords = require("../utils/generateKeywords");
+ const extractSpecifications = require("../utils/extractSpecifications");
++const { variantsFromSupplier } = require("../utils/productVariants");
+ 
+ const SUPPLIER = "metrosports";
+ const DEFAULT_AVAILABILITY = "Contact Kreedum Sports for product availability.";
+@@ -117,6 +118,10 @@ function buildProduct(sp, tree, existing, usedSlugs, issues) {
+   const features = sp.features || [];
+   const { specifications, highlights } = extractSpecifications(features);
+ 
++  // Weight / size options, each with its own price (the scraper's sellingPrice
++  // is already the cheapest one).
++  const { options, variants, maxPrice } = variantsFromSupplier(sp, sellingPrice);
++
+   const categoryWords = categoryPath.map((slug) => tree.get(slug)?.name).filter(Boolean);
+   const searchKeywords = [
+     ...new Set([
+@@ -159,6 +164,10 @@ function buildProduct(sp, tree, existing, usedSlugs, issues) {
+       mrp,
+       sellingPrice,
+       discountPercent,
++      maxPrice,
++
++      options,
++      variants,
+ 
+       thumbnail: sp.thumbnail || sp.images?.[0] || "",
+       images: sp.images || [],
+@@ -269,6 +278,7 @@ function planRebuild({ supplierCategories, supplierProducts, existingProducts =
+       emptyCategories: categories.filter((c) => !categoryCounts.get(c.slug)).map((c) => c.slug),
+       staleCategories,
+       products: products.length,
++      productsWithOptions: products.filter((p) => p.update.$set.variants.length).length,
+       newProducts: products.filter((p) => !p.existing).length,
+       visibleProducts: visible.length,
+       hiddenProducts: products.length - visible.length,
+diff --git a/src/models/Cart.js b/src/models/Cart.js
+index 9b894b4..5f03c71 100644
+--- a/src/models/Cart.js
++++ b/src/models/Cart.js
+@@ -16,6 +16,13 @@ const cartSchema = new mongoose.Schema(
+       index: true,
+     },
+ 
++    // Chosen option of a product sold in several weights / sizes
++    // (Product.variants[].variantId); "" for products without options.
++    variantId: {
++      type: String,
++      default: "",
++    },
++
+     quantity: {
+       type: Number,
+       required: true,
+@@ -29,12 +36,14 @@ const cartSchema = new mongoose.Schema(
+   }
+ );
+ 
+-// Prevent duplicate cart entries per user
++// One cart line per product and option (5 kg and 10 kg of the same
++// dumbbell are two lines). Replaces the old one-line-per-product index
++// "cart_user_product_unique"; src/utils/ensureCartIndexes.js swaps them.
+ cartSchema.index(
+-  { user: 1, product: 1 },
++  { user: 1, product: 1, variantId: 1 },
+   {
+     unique: true,
+-    name: "cart_user_product_unique",
++    name: "cart_user_product_variant_unique",
+   }
+ );
+ 
+diff --git a/src/models/Order.js b/src/models/Order.js
+index dd77c12..1e5b5b3 100644
+--- a/src/models/Order.js
++++ b/src/models/Order.js
+@@ -23,11 +23,25 @@ const orderItemSchema = new mongoose.Schema(
+ 
+     sku: String,
+ 
++    // Chosen option of a product sold in several weights / sizes,
++    // e.g. variantLabel "Weight: 5 kg". Empty for products without options.
++    variantId: {
++      type: String,
++      default: "",
++    },
++
++    variantLabel: {
++      type: String,
++      default: "",
++    },
++
+     price: {
+       type: Number,
+       required: true,
+     },
+ 
++    mrp: Number,
++
+     quantity: {
+       type: Number,
+       required: true,
+diff --git a/src/models/Product.js b/src/models/Product.js
+index ee28332..4cd906c 100644
+--- a/src/models/Product.js
++++ b/src/models/Product.js
+@@ -1,5 +1,30 @@
+ const mongoose = require("mongoose");
+ 
++// Option of a product sold in several versions, e.g. { name: "Weight", values: ["2.5 kg", "5 kg"] }.
++const productOptionSchema = new mongoose.Schema(
++  {
++    name: { type: String, required: true },
++    values: { type: [String], default: [] },
++  },
++  { _id: false }
++);
++
++// One sellable version: { Weight: "5 kg" } at its own price.
++// variantId is the supplier's id for it, stable across catalogue rebuilds.
++const productVariantSchema = new mongoose.Schema(
++  {
++    variantId: { type: String, required: true },
++    options: { type: mongoose.Schema.Types.Mixed, default: {} },
++    label: { type: String, default: "" },
++    sku: { type: String, default: "" },
++    mrp: { type: Number, default: 0 },
++    sellingPrice: { type: Number, required: true },
++    inStock: { type: Boolean, default: true },
++    image: { type: String, default: "" },
++  },
++  { _id: false }
++);
++
+ const productSchema = new mongoose.Schema(
+   {
+     // =====================================================
+@@ -110,6 +135,31 @@ const productSchema = new mongoose.Schema(
+       default: 0,
+     },
+ 
++    // Products sold in several weights / sizes: sellingPrice and mrp above
++    // are the cheapest option, maxPrice the most expensive ("₹499 – ₹13,499").
++    // Equal to sellingPrice for products without options.
++    maxPrice: {
++      type: Number,
++      default: 0,
++    },
++
++    // =====================================================
++    // OPTIONS (weight, size …)
++    // =====================================================
++
++    // [{ name: "Weight", values: ["2.5 kg", "5 kg"] }] — in display order.
++    options: {
++      type: [productOptionSchema],
++      default: [],
++    },
++
++    // One per option combination, each with its own price. The customer must
++    // pick one; carts and orders store its variantId.
++    variants: {
++      type: [productVariantSchema],
++      default: [],
++    },
++
+     // =====================================================
+     // MEDIA
+     // =====================================================
+diff --git a/src/routes/cartRoutes.js b/src/routes/cartRoutes.js
+index 07c250f..87fb1b0 100644
+--- a/src/routes/cartRoutes.js
++++ b/src/routes/cartRoutes.js
+@@ -50,6 +50,10 @@ router.get("/", authMiddleware, cartController.getCart);
+  *               quantity:
+  *                 type: integer
+  *                 example: 2
++ *               variantId:
++ *                 type: string
++ *                 description: Chosen option (weight, size …). Required for products with options.
++ *                 example: "7027"
+  *     responses:
+  *       201:
+  *         description: Product added successfully.
+@@ -83,6 +87,9 @@ router.post("/:productId", authMiddleware, cartController.addToCart);
+  *               quantity:
+  *                 type: integer
+  *                 example: 3
++ *               variantId:
++ *                 type: string
++ *                 description: Option of the cart line to update ("" or omitted for products without options).
+  *     responses:
+  *       200:
+  *         description: Cart quantity updated.
+@@ -104,6 +111,12 @@ router.patch("/:productId", authMiddleware, cartController.updateQuantity);
+  *         schema:
+  *           type: string
+  *         example: 68aa507292eba10c8a50b14f
++ *       - in: query
++ *         name: variant
++ *         required: false
++ *         schema:
++ *           type: string
++ *         description: Option of the cart line to remove (products with options).
+  *     responses:
+  *       200:
+  *         description: Product removed successfully.
+diff --git a/src/services/cartService.js b/src/services/cartService.js
+index 8a76bca..edc4be4 100644
+--- a/src/services/cartService.js
++++ b/src/services/cartService.js
+@@ -1,6 +1,7 @@
+ const mongoose = require("mongoose");
+ const Cart = require("../models/Cart");
+ const Product = require("../models/Product");
++const { hasVariants, findVariant, pricing, resolveVariant } = require("../utils/productVariants");
+ 
+ const MAX_CART_QUANTITY = 5;
+ 
+@@ -22,43 +23,68 @@ class CartService {
+       .lean();
+ 
+     const products = [];
++    const staleLines = [];
+     let subtotal = 0;
+     let totalItems = 0;
+ 
+     for (const item of cartItems) {
+       if (!item.product) continue;
+ 
+-      const price =
+-        item.product.sellingPrice ??
+-        item.product.salePrice ??
+-        item.product.price ??
+-        0;
++      const variantId = item.variantId || "";
++      const variant = findVariant(item.product, variantId);
+ 
+-      const total = price * item.quantity;
++      // The option is gone (Metro stopped selling that weight), or the line
++      // was added before the product had options: it can't be priced, so
++      // take it out and tell the customer to choose again.
++      if (hasVariants(item.product) ? !variant : variantId) {
++        staleLines.push(item);
++        continue;
++      }
++
++      const price = pricing(item.product, variant);
++      const total = price.sellingPrice * item.quantity;
+ 
+       subtotal += total;
+       totalItems += item.quantity;
+ 
++      const { variants: _variants, ...product } = item.product;
++
+       products.push({
++        ...product,
++        ...price,
++        variantId,
++        ...(variant && variant.inStock === false ? { stockStatus: "out_of_stock" } : {}),
+         cartId: item._id,
+         quantity: item.quantity,
+         addedAt: item.createdAt,
+         total,
+-        ...item.product,
+       });
+     }
+ 
++    if (staleLines.length) {
++      await Cart.deleteMany({ _id: { $in: staleLines.map((item) => item._id) } });
++    }
++
+     return {
+       totalItems,
+       subtotal,
+       products,
++      // Shown on the cart page (each product once).
++      removedItems: [...new Map(staleLines.map((item) => [String(item.product._id), item.product])).values()].map(
++        (product) => ({
++          productId: product._id,
++          name: product.name,
++          slug: product.slug,
++          reason: "Choose an option again: the one you picked is no longer available.",
++        })
++      ),
+     };
+   }
+ 
+   // ==========================
+   // Add Product to Cart
+   // ==========================
+-  async addToCart(userId, productId, quantity = 1) {
++  async addToCart(userId, productId, quantity = 1, variantId = "") {
+ 
+ if (!mongoose.Types.ObjectId.isValid(productId)) {
+   throw new Error("Invalid product ID.");
+@@ -74,6 +100,10 @@ if (!mongoose.Types.ObjectId.isValid(productId)) {
+       throw new Error("Quantity must be at least 1.");
+     }
+ 
++    // Weight / size: required for products that have options.
++    const variant = resolveVariant(product, variantId);
++    const lineVariantId = variant ? variant.variantId : "";
++
+     if (quantity > MAX_CART_QUANTITY) {
+   throw new Error(
+     `Maximum ${MAX_CART_QUANTITY} quantity allowed for a single product.`
+@@ -83,6 +113,7 @@ if (!mongoose.Types.ObjectId.isValid(productId)) {
+     const existingItem = await Cart.findOne({
+       user: userId,
+       product: productId,
++      variantId: lineVariantId,
+     });
+ 
+     if (existingItem) {
+@@ -103,6 +134,7 @@ if (newQuantity > MAX_CART_QUANTITY) {
+     const cartItem = await Cart.create({
+       user: userId,
+       product: productId,
++      variantId: lineVariantId,
+       quantity,
+     });
+ 
+@@ -112,7 +144,7 @@ if (newQuantity > MAX_CART_QUANTITY) {
+   // ==========================
+   // Update Cart Quantity
+   // ==========================
+-  async updateQuantity(userId, productId, quantity) {
++  async updateQuantity(userId, productId, quantity, variantId = "") {
+     if (quantity > MAX_CART_QUANTITY) {
+   throw new Error(
+     `Maximum ${MAX_CART_QUANTITY} quantity allowed for a single product.`
+@@ -133,9 +165,14 @@ if (newQuantity > MAX_CART_QUANTITY) {
+       throw new Error("Requested quantity exceeds available stock.");
+     }
+ 
++    if (!Number.isInteger(quantity) || quantity < 1) {
++      throw new Error("Quantity must be at least 1.");
++    }
++
+     const cartItem = await Cart.findOne({
+       user: userId,
+       product: productId,
++      variantId: String(variantId || ""),
+     });
+ 
+     if (!cartItem) {
+@@ -151,7 +188,7 @@ if (newQuantity > MAX_CART_QUANTITY) {
+   // ==========================
+   // Remove Product from Cart
+   // ==========================
+-  async removeFromCart(userId, productId) {
++  async removeFromCart(userId, productId, variantId = "") {
+ 
+ if (!mongoose.Types.ObjectId.isValid(productId)) {
+   throw new Error("Invalid product ID.");
+@@ -160,6 +197,7 @@ if (!mongoose.Types.ObjectId.isValid(productId)) {
+     const deleted = await Cart.findOneAndDelete({
+       user: userId,
+       product: productId,
++      variantId: String(variantId || ""),
+     });
+ 
+     if (!deleted) {
+diff --git a/src/services/orderService.js b/src/services/orderService.js
+index 29f0f73..537f453 100644
+--- a/src/services/orderService.js
++++ b/src/services/orderService.js
+@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
+ const Cart = require("../models/Cart");
+ const Product = require("../models/Product");
+ const Order = require("../models/Order");
++const { findVariant, hasVariants, pricing } = require("../utils/productVariants");
+ 
+ const MAX_CART_QUANTITY = 5;
+ 
+@@ -42,12 +43,22 @@ class OrderService {
+           throw new Error("Maximum quantity exceeded.");
+         }
+ 
+-        const price =
+-          product.sellingPrice ??
+-          product.salePrice ??
+-          product.price ??
+-          0;
++        // Products sold in several weights / sizes are charged at the
++        // chosen option's price, never the product's "from" price.
++        const variant = findVariant(product, cartItem.variantId);
+ 
++        if (hasVariants(product) ? !variant : cartItem.variantId) {
++          throw new Error(
++            `Please choose an option again for ${product.name}: the one in your cart is no longer available.`
++          );
++        }
++
++        if (variant && variant.inStock === false) {
++          throw new Error(`${product.name} (${variant.label}) is out of stock.`);
++        }
++
++        const unit = pricing(product, variant);
++        const price = unit.sellingPrice;
+         const total = price * cartItem.quantity;
+ 
+         subtotal += total;
+@@ -57,9 +68,12 @@ class OrderService {
+           name: product.name,
+           slug: product.slug,
+           brand: product.brand,
+-          thumbnail: product.thumbnail,
+-          sku: product.sku,
++          thumbnail: unit.thumbnail,
++          sku: unit.sku,
++          variantId: variant ? variant.variantId : "",
++          variantLabel: unit.variantLabel,
+           price,
++          mrp: unit.mrp,
+           quantity: cartItem.quantity,
+           total,
+         });
+diff --git a/src/utils/ensureCartIndexes.js b/src/utils/ensureCartIndexes.js
+new file mode 100644
+index 0000000..092916c
+--- /dev/null
++++ b/src/utils/ensureCartIndexes.js
+@@ -0,0 +1,25 @@
++const Cart = require("../models/Cart");
++
++const OLD_INDEX = "cart_user_product_unique";
++
++/**
++ * The cart used to allow one line per product. Products with options need one
++ * line per product + option, so the old unique index must go (MongoDB never
++ * drops an index by itself). Runs at server start; does nothing once done.
++ */
++async function ensureCartIndexes() {
++  try {
++    const indexes = await Cart.collection.indexes();
++    if (indexes.some((index) => index.name === OLD_INDEX)) {
++      await Cart.collection.dropIndex(OLD_INDEX);
++      console.log(`🛒 Cart: dropped old index ${OLD_INDEX}`);
++    }
++  } catch (error) {
++    // Collection not created yet: nothing to drop.
++    if (error.codeName !== "NamespaceNotFound" && error.code !== 26) throw error;
++  }
++
++  await Cart.createIndexes();
++}
++
++module.exports = ensureCartIndexes;
+diff --git a/src/utils/productVariants.js b/src/utils/productVariants.js
+new file mode 100644
+index 0000000..23dca0f
+--- /dev/null
++++ b/src/utils/productVariants.js
+@@ -0,0 +1,99 @@
++/**
++ * Products sold in several weights / sizes ("variants"), e.g. a dumbbell at
++ * 2.5 kg for ₹1,249 and 10 kg for ₹4,999. Everything that prices a product
++ * for a customer (cart, order) goes through here, so the price always comes
++ * from the chosen variant and never from the product's "from" price.
++ */
++
++function hasVariants(product) {
++  return Array.isArray(product?.variants) && product.variants.length > 0;
++}
++
++function findVariant(product, variantId) {
++  if (!hasVariants(product) || !variantId) return null;
++  return product.variants.find((variant) => variant.variantId === String(variantId)) || null;
++}
++
++/** "Weight: 5 kg" / "Size: M, Colour: Red" — what the customer chose. */
++function describeVariant(product, variant) {
++  if (!variant) return "";
++  const options = variant.options || {};
++  const names = (product.options || []).map((option) => option.name);
++  const keys = names.length ? names.filter((name) => options[name]) : Object.keys(options);
++  return keys.length ? keys.map((name) => `${name}: ${options[name]}`).join(", ") : variant.label || "";
++}
++
++/**
++ * What one unit costs and how it is shown: the variant's own price, SKU and
++ * photo when one is chosen, otherwise the product's.
++ */
++function pricing(product, variant) {
++  const sellingPrice = Number(variant ? variant.sellingPrice : product.sellingPrice ?? product.salePrice ?? product.price) || 0;
++  const mrp = Number(variant ? variant.mrp : product.mrp) || sellingPrice;
++  return {
++    sellingPrice,
++    mrp: Math.max(mrp, sellingPrice),
++    discountPercent: mrp > sellingPrice && sellingPrice > 0 ? Math.round(((mrp - sellingPrice) / mrp) * 100) : 0,
++    sku: (variant && variant.sku) || product.sku || "",
++    thumbnail: (variant && variant.image) || product.thumbnail || product.images?.[0] || "",
++    variantLabel: describeVariant(product, variant),
++  };
++}
++
++/**
++ * Check a customer's choice before it goes in the cart or an order.
++ * Returns the variant (or null for products without options); throws with a
++ * message the website can show.
++ */
++function resolveVariant(product, variantId) {
++  if (!hasVariants(product)) {
++    if (variantId) throw new Error("This product has no options to choose from.");
++    return null;
++  }
++
++  if (!variantId) {
++    const names = (product.options || []).map((o) => o.name.toLowerCase()).join(" and ") || "an option";
++    throw new Error(`Please choose ${names} first.`);
++  }
++
++  const variant = findVariant(product, variantId);
++  if (!variant) throw new Error("This option is no longer available. Please choose another.");
++  if (variant.inStock === false) throw new Error("This option is out of stock. Please choose another.");
++  return variant;
++}
++
++/**
++ * Options of a product sold in several weights / sizes, from the scraper's
++ * `options` / `variants`. Variants without a price or id are dropped; an
++ * option value nobody sells any more disappears with them.
++ */
++function variantsFromSupplier(sp, sellingPrice) {
++  const variants = (Array.isArray(sp.variants) ? sp.variants : [])
++    .filter((v) => v && v.variantId && Number(v.sellingPrice) > 0)
++    .map((v) => {
++      const price = Number(v.sellingPrice);
++      return {
++        variantId: String(v.variantId),
++        options: v.options || {},
++        label: v.label || "",
++        sku: v.sku || "",
++        mrp: Math.max(Number(v.mrp) || 0, price),
++        sellingPrice: price,
++        inStock: v.inStock !== false,
++        image: v.image || "",
++      };
++    });
++
++  if (!variants.length) return { options: [], variants: [], maxPrice: sellingPrice };
++
++  const options = (sp.options || [])
++    .map((o) => ({
++      name: o.name,
++      values: (o.values || []).filter((value) => variants.some((v) => v.options[o.name] === value)),
++    }))
++    .filter((o) => o.name && o.values.length);
++
++  return { options, variants, maxPrice: Math.max(...variants.map((v) => v.sellingPrice)) };
++}
++
++module.exports = { hasVariants, findVariant, describeVariant, pricing, resolveVariant, variantsFromSupplier };
+diff --git a/src/utils/transformProduct.js b/src/utils/transformProduct.js
+index b4ec136..8838c61 100644
+--- a/src/utils/transformProduct.js
++++ b/src/utils/transformProduct.js
+@@ -2,6 +2,7 @@ const generateSlug = require("./generateSlug");
+ const generateKeywords = require("./generateKeywords");
+ const resolveCategory = require("./categoryResolver");
+ const extractSpecifications = require("./extractSpecifications");
++const { variantsFromSupplier } = require("./productVariants");
+ 
+ /**
+  * Convert Metro Sports product into Kreedum ecommerce product.
+@@ -64,6 +65,9 @@ function transformProduct(product) {
+     sellingPrice: product.sellingPrice || product.mrp || 0,
+     discountPercent,
+ 
++    // Weight / size options, each with its own price.
++    ...variantsFromSupplier(product, product.sellingPrice || product.mrp || 0),
++
+     thumbnail: product.thumbnail || product.images?.[0] || "",
+     images: product.images || [],
+ 
