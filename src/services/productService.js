@@ -17,12 +17,18 @@ async getProductsByCategory(slug, query) {
     ],
   };
 
-  if (query.brand){
-    filter.$or = [
-  { brandSlug: query.brand },
-  { brand: new RegExp(`^${query.brand}$`, "i") },
-];
-  } 
+  // Brand narrows the category; it must not replace the category filter.
+  if (query.brand) {
+    const brand = String(query.brand).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    filter.$and = [
+      {
+        $or: [
+          { brandSlug: query.brand },
+          { brand: new RegExp(`^${brand}$`, "i") },
+        ],
+      },
+    ];
+  }
 
   if (query.minPrice || query.maxPrice) {
     filter.sellingPrice = {};

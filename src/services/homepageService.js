@@ -23,7 +23,7 @@ class HomepageService {
         subtitle: "Build your dream gym at home with Kreedum Sports.",
         image: "/banners/home-gym.jpg",
         buttonText: "Explore Home Gym",
-        buttonLink: "/products?category=home-gym",
+        buttonLink: "/categories/home-gym",
       },
       {
         id: 3,
@@ -31,7 +31,7 @@ class HomepageService {
         subtitle: "Badminton • Basketball • Pickleball • Football Turf",
         image: "/banners/sports-flooring.jpg",
         buttonText: "Explore Sports Infrastructure",
-        buttonLink: "/categories/sports-flooring",
+        buttonLink: "/categories/flooring",
       },
     ];
   }

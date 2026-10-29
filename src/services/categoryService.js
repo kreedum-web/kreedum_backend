@@ -3,35 +3,42 @@ const Product = require('../models/Product');
 
 
 class CategoryService {
-  // Full category tree for website mega menu
+  // Full category tree for website mega menu.
+  // Same order as the Metro Sports menu (displayOrder), with product counts
+  // so the website can hide empty categories.
   async getCategoryTree() {
-    const categories = await Category.find({})
-      .sort({ level: 1, name: 1 })
+    const categories = await Category.find({ isActive: { $ne: false } })
+      .sort({ level: 1, displayOrder: 1, name: 1 })
       .lean();
+
+    const node = (category, children) => ({
+      _id: category._id,
+      name: category.name,
+      slug: category.slug,
+      level: category.level,
+      productCount: category.productCount || 0,
+      ...(children ? { children } : {}),
+    });
 
     const departments = categories.filter((c) => c.level === 1);
     const parents = categories.filter((c) => c.level === 2);
     const children = categories.filter((c) => c.level === 3);
 
-    return departments.map((department) => ({
-      _id: department._id,
-      name: department.name,
-      slug: department.slug,
-      children: parents
-        .filter((parent) => parent.parentSlug === department.slug)
-        .map((parent) => ({
-          _id: parent._id,
-          name: parent.name,
-          slug: parent.slug,
-          children: children
-            .filter((child) => child.parentSlug === parent.slug)
-            .map((child) => ({
-              _id: child._id,
-              name: child.name,
-              slug: child.slug,
-            })),
-        })),
-    }));
+    return departments.map((department) =>
+      node(
+        department,
+        parents
+          .filter((parent) => parent.parentSlug === department.slug)
+          .map((parent) =>
+            node(
+              parent,
+              children
+                .filter((child) => child.parentSlug === parent.slug)
+                .map((child) => node(child))
+            )
+          )
+      )
+    );
   }
 
   // Single category by slug
