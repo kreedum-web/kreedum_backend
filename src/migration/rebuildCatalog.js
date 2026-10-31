@@ -42,6 +42,8 @@ const generateSlug = require("../utils/generateSlug");
 const generateKeywords = require("../utils/generateKeywords");
 const extractSpecifications = require("../utils/extractSpecifications");
 const { variantsFromSupplier } = require("../utils/productVariants");
+const { productImageUrls, isOwnImage, withOwnImages } = require("../utils/productImages");
+const ImageAsset = require("../models/ImageAsset");
 
 const SUPPLIER = "metrosports";
 const DEFAULT_AVAILABILITY = "Contact Kreedum Sports for product availability.";
@@ -216,7 +218,14 @@ function buildProduct(sp, tree, existing, usedSlugs, issues) {
 /**
  * Work out every change without touching the database.
  */
-function planRebuild({ supplierCategories, supplierProducts, existingProducts = [], existingCategories = [], existingBrands = [] }) {
+function planRebuild({
+  supplierCategories,
+  supplierProducts,
+  existingProducts = [],
+  existingCategories = [],
+  existingBrands = [],
+  imageMap = new Map(), // supplier photo -> our Cloudinary copy (npm run images:upload)
+}) {
   const issues = [];
 
   // ---------- categories
@@ -241,7 +250,9 @@ function planRebuild({ supplierCategories, supplierProducts, existingProducts = 
     .sort((a, b) => a.url.localeCompare(b.url))
     .map((sp) => {
       const existing = findExisting(sp);
-      return { sp, existing, update: buildProduct(sp, tree, existing, usedSlugs, issues) };
+      // Photos already copied to our Cloudinary are used instead of the supplier's.
+      const withImages = withOwnImages(sp, imageMap);
+      return { sp, existing, update: buildProduct(withImages, tree, existing, usedSlugs, issues) };
     });
 
   const removed = existingProducts.filter(
@@ -279,6 +290,10 @@ function planRebuild({ supplierCategories, supplierProducts, existingProducts = 
       staleCategories,
       products: products.length,
       productsWithOptions: products.filter((p) => p.update.$set.variants.length).length,
+      // > 0: run `npm run images:upload -- --apply` after the rebuild
+      photosNotInOwnStorage: new Set(
+        products.flatMap((p) => productImageUrls(p.update.$set)).filter((url) => !isOwnImage(url))
+      ).size,
       newProducts: products.filter((p) => !p.existing).length,
       visibleProducts: visible.length,
       hiddenProducts: products.length - visible.length,
@@ -418,13 +433,22 @@ async function main() {
   const supplierCategories = await supplier.collection("categories").find({ supplier: SUPPLIER, isActive: true }).toArray();
   const supplierProducts = await supplier.collection("products").find({ supplier: SUPPLIER }).toArray();
 
-  const [existingProducts, existingCategories, existingBrands] = await Promise.all([
+  const [existingProducts, existingCategories, existingBrands, imageAssets] = await Promise.all([
     Product.find({}, { sourceUrl: 1, slug: 1, visibility: 1, isActive: 1 }).lean(),
     Category.find({}, { slug: 1 }).lean(),
     Brand.find({}, { slug: 1 }).lean(),
+    ImageAsset.find({}, { sourceUrl: 1, url: 1 }).lean(),
   ]);
+  const imageMap = new Map(imageAssets.map((asset) => [asset.sourceUrl, asset.url]));
 
-  const plan = planRebuild({ supplierCategories, supplierProducts, existingProducts, existingCategories, existingBrands });
+  const plan = planRebuild({
+    supplierCategories,
+    supplierProducts,
+    existingProducts,
+    existingCategories,
+    existingBrands,
+    imageMap,
+  });
 
   console.log("========== REBUILD PLAN ==========");
   console.log(JSON.stringify(plan.summary, null, 2));
@@ -436,6 +460,11 @@ async function main() {
   } else {
     await applyPlan(plan);
     await verify();
+    if (plan.summary.photosNotInOwnStorage) {
+      console.log(
+        `📷 ${plan.summary.photosNotInOwnStorage} photos still load from the supplier. Copy them with: npm run images:upload -- --apply`
+      );
+    }
   }
 
   await mongoose.disconnect();

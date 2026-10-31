@@ -6,3 +6,4 @@ coverage
 .vscode
 npm-debug.log*
 rebuild-report.json
+image-upload-failures.json
