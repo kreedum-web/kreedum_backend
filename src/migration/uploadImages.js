@@ -31,6 +31,7 @@ const {
   deliveryUrl,
   withOwnImages,
 } = require("../utils/productImages");
+const { assetFolderFor, checkCloudinaryUrl } = require("../utils/cloudinaryFolders");
 
 const CONCURRENCY = 4;
 const RETRIES = 3;
@@ -52,6 +53,7 @@ async function uploadOne(sourceUrl, publicId) {
     try {
       return await cloudinary.uploader.upload(sourceUrl, {
         public_id: publicId,
+        asset_folder: assetFolderFor(publicId), // Media Library folder: kreedum/products
         overwrite: false,
         unique_filename: false,
         resource_type: "image",
@@ -93,11 +95,7 @@ async function main() {
   const apply = process.argv.includes("--apply");
   const limit = Number(option("--limit")) || Infinity;
 
-  if (apply && !process.env.CLOUDINARY_URL) {
-    throw new Error(
-      "CLOUDINARY_URL is missing in .env. Copy it from Cloudinary → Settings → API Keys (\"API environment variable\")."
-    );
-  }
+  if (apply) checkCloudinaryUrl();
 
   await connectDatabase();
 

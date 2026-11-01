@@ -1,5 +1,15 @@
 const authService = require("../services/authService");
 
+/** Errors with a status (HttpError) keep it and tell the website what happened via `code`. */
+function sendError(res, error, fallbackStatus) {
+  return res.status(error.status || fallbackStatus).json({
+    success: false,
+    message: error.message,
+    ...(error.code ? { code: error.code } : {}),
+    ...(error.extra || {}),
+  });
+}
+
 class AuthController {
 
   // ----------------------------
@@ -11,15 +21,12 @@ class AuthController {
 
       return res.status(201).json({
         success: true,
-        message: "Customer registered successfully.",
+        message: "We've sent a 6-digit code to your email. Enter it to finish creating your account.",
         data: result,
       });
 
     } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
+      return sendError(res, error, 400);
     }
   }
 
@@ -39,10 +46,47 @@ class AuthController {
       });
 
     } catch (error) {
-      return res.status(401).json({
-        success: false,
-        message: error.message,
-      });
+      return sendError(res, error, 401);
+    }
+  }
+
+  // POST /auth/verify-email { email, code }
+  async verifyEmail(req, res) {
+    try {
+      const result = await authService.verifyEmail(req.body.email, req.body.code);
+      return res.status(200).json({ success: true, message: "Email verified. Welcome to Kreedum Sports!", data: result });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
+
+  // POST /auth/resend-code { email }
+  async resendCode(req, res) {
+    try {
+      await authService.resendVerificationCode(req.body.email);
+      return res.status(200).json({ success: true, message: "If your account is waiting for verification, a new code is on its way." });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
+
+  // POST /auth/forgot-password { email }
+  async forgotPassword(req, res) {
+    try {
+      await authService.forgotPassword(req.body.email);
+      return res.status(200).json({ success: true, message: "If an account exists for this email, we've sent a 6-digit code to it." });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
+
+  // POST /auth/reset-password { email, code, password }
+  async resetPassword(req, res) {
+    try {
+      const result = await authService.resetPassword(req.body.email, req.body.code, req.body.password);
+      return res.status(200).json({ success: true, message: "Your password has been changed.", data: result });
+    } catch (error) {
+      return sendError(res, error, 400);
     }
   }
 

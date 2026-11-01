@@ -53,6 +53,17 @@ const userSchema = new mongoose.Schema(
     lastLoginAt: {
       type: Date,
     },
+
+    // false: signed up but hasn't entered the emailed code yet (can't log in).
+    // Deliberately no default: accounts created before email codes existed
+    // have no value and count as verified.
+    emailVerified: {
+      type: Boolean,
+    },
+
+    emailVerifiedAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,

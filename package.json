@@ -15,7 +15,8 @@
     "rebuild:catalog": "node src/migration/rebuildCatalog.js",
     "images:upload": "node src/migration/uploadImages.js",
     "test": "node --test test/*.test.js",
-    "content:seed": "node src/migration/seedSiteContent.js"
+    "content:seed": "node src/migration/seedSiteContent.js",
+    "images:folders": "node src/migration/organizeImageFolders.js"
   },
   "keywords": [],
   "author": "",
@@ -34,6 +35,7 @@
     "mongodb": "^6.20.0",
     "mongoose": "^8.24.4",
     "morgan": "^1.12.1",
+    "nodemailer": "^10.1.7",
     "slugify": "^1.6.9",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",

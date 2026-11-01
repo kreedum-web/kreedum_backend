@@ -79,6 +79,61 @@ router.post("/login", authController.login);
 
 /**
  * @swagger
+ * /api/v1/auth/verify-email:
+ *   post:
+ *     summary: Finish sign-up with the 6-digit code emailed to the customer (returns token)
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email: { type: string }
+ *               code: { type: string, example: "482913" }
+ */
+router.post("/verify-email", authController.verifyEmail);
+
+/**
+ * @swagger
+ * /api/v1/auth/resend-code:
+ *   post:
+ *     summary: Email a new sign-up code (at most once a minute, 5 an hour)
+ *     tags: [Authentication]
+ */
+router.post("/resend-code", authController.resendCode);
+
+/**
+ * @swagger
+ * /api/v1/auth/forgot-password:
+ *   post:
+ *     summary: Email a password reset code
+ *     tags: [Authentication]
+ */
+router.post("/forgot-password", authController.forgotPassword);
+
+/**
+ * @swagger
+ * /api/v1/auth/reset-password:
+ *   post:
+ *     summary: Set a new password with the emailed code (returns token)
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email: { type: string }
+ *               code: { type: string }
+ *               password: { type: string }
+ */
+router.post("/reset-password", authController.resetPassword);
+
+/**
+ * @swagger
  * /api/v1/auth/me:
  *   get:
  *     summary: Get logged-in customer profile

@@ -8,6 +8,11 @@
  *
  * Each kind is stored at most `storeMax` px and delivered to customers as
  * WebP / AVIF at most `deliverMax` px.
+ *
+ * Cloudinary accounts created after June 2024 use "dynamic folders": the
+ * folder shown in the Media Library (asset_folder) is separate from the
+ * image's name (public_id). Every upload sets both, so images land in their
+ * folder; `npm run images:folders` moves images uploaded before that.
  */
 const { v2: cloudinary } = require("cloudinary");
 
@@ -17,6 +22,14 @@ const KINDS = {
   leaders: { folder: "kreedum/leaders", storeMax: 1200, deliverMax: 800 },
   clients: { folder: "kreedum/clients", storeMax: 600, deliverMax: 400 },
 };
+
+/** Media Library folder for an image, from its name: kreedum/products/2025/09/x -> kreedum/products. */
+function assetFolderFor(publicId = "") {
+  const kind = Object.values(KINDS).find(({ folder }) => publicId.startsWith(`${folder}/`));
+  if (kind) return kind.folder;
+  const slash = publicId.lastIndexOf("/");
+  return slash === -1 ? "" : publicId.slice(0, slash);
+}
 
 /** "Integral University, Lucknow" -> "integral-university-lucknow" */
 function fileName(name = "") {
@@ -65,6 +78,7 @@ async function uploadImage(source, { kind, name, overwrite = false }) {
 
   const result = await cloudinary.uploader.upload(source, {
     public_id: `${settings.folder}/${fileName(name)}`,
+    asset_folder: settings.folder,
     overwrite,
     invalidate: overwrite,
     unique_filename: false,
@@ -75,4 +89,4 @@ async function uploadImage(source, { kind, name, overwrite = false }) {
   return { url: deliveryUrl(result.secure_url, kind), publicId: result.public_id };
 }
 
-module.exports = { KINDS, fileName, deliveryUrl, checkCloudinaryUrl, uploadImage };
+module.exports = { KINDS, assetFolderFor, fileName, deliveryUrl, checkCloudinaryUrl, uploadImage };

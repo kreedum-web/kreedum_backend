@@ -1,6 +1,35 @@
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const { generateToken } = require("../utils/jwt");
+const HttpError = require("../utils/httpError");
+const emailCodeService = require("./emailCodeService");
+const { CODE_MINUTES } = require("./emailCodeService");
+const { sendMail } = require("../utils/mailer");
+const { verificationCodeEmail, passwordResetCodeEmail } = require("../emails/templates");
+
+const MIN_PASSWORD = 8;
+
+function publicUser(user) {
+  return {
+    id: user._id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+  };
+}
+
+/** Send a sign-up code. Mail errors become a message the customer can act on. */
+async function sendVerificationCode(user) {
+  const code = await emailCodeService.issue(user.email, "verify_email");
+  try {
+    await sendMail({ to: user.email, ...verificationCodeEmail({ name: user.firstName, code, minutes: CODE_MINUTES }) });
+  } catch (error) {
+    console.error("Verification email failed:", error.message);
+    throw new HttpError(502, "We couldn't send the code email right now. Please try again in a minute.", "EMAIL_SEND_FAILED");
+  }
+}
 
 // Accept strict date-only ISO strings to avoid ambiguous date parsing.
 
@@ -89,34 +118,113 @@ const parsedBirthday = parseBirthday(birthday);
       email: email.toLowerCase(),
     });
 
-    if (existingUser) {
+    // Signed up before but never entered the code: start over with the new details.
+    if (existingUser && existingUser.emailVerified !== false) {
       throw new Error("Email already registered.");
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    const user = await User.create({
+    const details = {
       firstName,
       lastName,
       email: email.toLowerCase(),
       phone,
       birthday: parsedBirthday,
       password: hashedPassword,
-    });
-
-    const token = generateToken(user);
-
-    return {
-      user: {
-        id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-      },
-      token,
+      emailVerified: false,
     };
+
+    let user;
+    if (existingUser) {
+      Object.assign(existingUser, details);
+      user = await existingUser.save();
+    } else {
+      user = await User.create(details);
+    }
+
+    // The account is usable once the emailed code is entered (verifyEmail).
+    await sendVerificationCode(user);
+
+    return { requiresVerification: true, email: user.email };
+  }
+
+  // ----------------------------
+  // Confirm email with the code (logs the customer in)
+  // ----------------------------
+  async verifyEmail(email, code) {
+    const user = await User.findOne({ email: String(email || "").toLowerCase().trim() });
+    if (!user) throw new HttpError(400, "This code has expired. Please ask for a new one.", "CODE_EXPIRED");
+    if (user.emailVerified !== false) {
+      throw new HttpError(409, "This email is already verified. Please log in.", "ALREADY_VERIFIED");
+    }
+
+    await emailCodeService.verify(user.email, "verify_email", code);
+
+    user.emailVerified = true;
+    user.emailVerifiedAt = new Date();
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    return { user: publicUser(user), token: generateToken(user) };
+  }
+
+  // ----------------------------
+  // New sign-up code
+  // ----------------------------
+  async resendVerificationCode(email) {
+    const user = await User.findOne({ email: String(email || "").toLowerCase().trim() });
+    // Same answer whether or not the account exists.
+    if (!user || user.emailVerified !== false) return { sent: true };
+    await sendVerificationCode(user);
+    return { sent: true };
+  }
+
+  // ----------------------------
+  // Forgot password: email a reset code
+  // ----------------------------
+  async forgotPassword(email) {
+    const normalized = String(email || "").toLowerCase().trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+      throw new HttpError(400, "Enter a valid email address.", "INVALID_EMAIL");
+    }
+
+    const user = await User.findOne({ email: normalized });
+    // Same answer whether or not the account exists, so emails can't be probed.
+    if (!user || user.isActive === false) return { sent: true };
+
+    const code = await emailCodeService.issue(user.email, "reset_password");
+    try {
+      await sendMail({ to: user.email, ...passwordResetCodeEmail({ name: user.firstName, code, minutes: CODE_MINUTES }) });
+    } catch (error) {
+      console.error("Password reset email failed:", error.message);
+      throw new HttpError(502, "We couldn't send the code email right now. Please try again in a minute.", "EMAIL_SEND_FAILED");
+    }
+    return { sent: true };
+  }
+
+  // ----------------------------
+  // Reset password with the code (logs the customer in)
+  // ----------------------------
+  async resetPassword(email, code, newPassword) {
+    if (!newPassword || newPassword.trim().length === 0 || newPassword.length < MIN_PASSWORD) {
+      throw new HttpError(400, `Password must be at least ${MIN_PASSWORD} characters long.`, "WEAK_PASSWORD");
+    }
+
+    const user = await User.findOne({ email: String(email || "").toLowerCase().trim() });
+    if (!user) throw new HttpError(400, "This code has expired. Please ask for a new one.", "CODE_EXPIRED");
+
+    await emailCodeService.verify(user.email, "reset_password", code);
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    // The code proves they own the email.
+    if (user.emailVerified === false) {
+      user.emailVerified = true;
+      user.emailVerifiedAt = new Date();
+    }
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    return { user: publicUser(user), token: generateToken(user) };
   }
 
   // ----------------------------
@@ -138,6 +246,19 @@ const parsedBirthday = parseBirthday(birthday);
 
     if (!passwordMatched) {
       throw new Error("Invalid email or password.");
+    }
+
+    // Signed up but never entered the code: send a fresh one and ask for it.
+    if (user.emailVerified === false) {
+      try {
+        await sendVerificationCode(user);
+      } catch (error) {
+        // A code sent less than a minute ago still works.
+        if (error.code !== "CODE_COOLDOWN") throw error;
+      }
+      throw new HttpError(403, "Please verify your email first. We've sent a code to your inbox.", "EMAIL_NOT_VERIFIED", {
+        email: user.email,
+      });
     }
 
     user.lastLoginAt = new Date();

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Cart = require("../models/Cart");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
+const { sendOrderConfirmation } = require("./orderEmailService");
 const { findVariant, hasVariants, pricing } = require("../utils/productVariants");
 
 const MAX_CART_QUANTITY = 5;
@@ -130,6 +131,10 @@ class OrderService {
 
       await session.commitTransaction();
       session.endSession();
+
+      // Order confirmation email, in the background: the customer doesn't
+      // wait for it, and a mail problem never affects the order.
+      sendOrderConfirmation(order[0], userId);
 
       return order[0];
 
