@@ -14,7 +14,8 @@
     "migrate:enrich-products": "node src/migration/enrichProducts.js",
     "rebuild:catalog": "node src/migration/rebuildCatalog.js",
     "images:upload": "node src/migration/uploadImages.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "content:seed": "node src/migration/seedSiteContent.js"
   },
   "keywords": [],
   "author": "",

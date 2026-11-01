@@ -1,39 +1,16 @@
 const Product = require("../models/Product");
 const Category = require("../models/Category");
 const Brand = require("../models/Brand");
+const siteContentService = require("./siteContentService");
 
 class HomepageService {
 
   // ----------------------------
-  // Hero Banner (Static v1)
+  // Hero / offer banners: managed in the database (hero_banners),
+  // images in Cloudinary kreedum/homepage/hero
   // ----------------------------
   async getHeroBanners() {
-    return [
-      {
-        id: 1,
-        title: "Aerofit Premium Gym Equipment",
-        subtitle: "Official Aerofit Channel Partner in Lucknow",
-        image: "/banners/aerofit-premium.jpg",
-        buttonText: "Shop Aerofit",
-        buttonLink: "/brands/aerofit",
-      },
-      {
-        id: 2,
-        title: "Complete Home Gym Setup",
-        subtitle: "Build your dream gym at home with Kreedum Sports.",
-        image: "/banners/home-gym.jpg",
-        buttonText: "Explore Home Gym",
-        buttonLink: "/categories/home-gym",
-      },
-      {
-        id: 3,
-        title: "Sports Flooring & Court Solutions",
-        subtitle: "Badminton • Basketball • Pickleball • Football Turf",
-        image: "/banners/sports-flooring.jpg",
-        buttonText: "Explore Sports Infrastructure",
-        buttonLink: "/categories/flooring",
-      },
-    ];
+    return siteContentService.getHeroBanners();
   }
 
   // ----------------------------
