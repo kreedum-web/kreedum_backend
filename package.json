@@ -16,7 +16,8 @@
     "images:upload": "node src/migration/uploadImages.js",
     "test": "node --test test/*.test.js",
     "content:seed": "node src/migration/seedSiteContent.js",
-    "images:folders": "node src/migration/organizeImageFolders.js"
+    "images:folders": "node src/migration/organizeImageFolders.js",
+    "gmail:token": "node src/scripts/gmailToken.js"
   },
   "keywords": [],
   "author": "",

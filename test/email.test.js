@@ -72,7 +72,7 @@ test("without SMTP settings the email is printed instead of sent", async () => {
   console.log = (text) => (printed += text);
   try {
     const result = await sendMail({ to: "a@b.c", subject: "Hi", html: "<p>x</p>", text: "Your code is 123456" });
-    assert.deepEqual(result, { sent: false });
+    assert.deepEqual(result, { sent: false, via: "log" });
     assert.match(printed, /NOT sent[\s\S]*Your code is 123456/);
   } finally {
     console.log = original;
