@@ -2,9 +2,11 @@ const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
+    // Empty until the customer gives a name (Google sign-in fills it, otherwise
+    // the first checkout address does). The site shows the email until then.
     firstName: {
       type: String,
-      required: true,
+      default: "",
       trim: true,
     },
 
@@ -33,10 +35,22 @@ const userSchema = new mongoose.Schema(
   default: null,
     },
 
+    // Only for accounts that chose a password. Accounts made with an email
+    // code or Google have none.
     password: {
       type: String,
-      required: true,
       select: false,
+    },
+
+    // Google account id ("sub") once the customer has used "Continue with Google".
+    googleId: {
+      type: String,
+      select: false,
+    },
+
+    avatarUrl: {
+      type: String,
+      default: "",
     },
 
     role: {
@@ -75,4 +89,9 @@ userSchema.index(
   { email: 1 },
   { unique: true, name: "user_email_unique" }
 );
+userSchema.index(
+  { googleId: 1 },
+  { unique: true, sparse: true, name: "user_google_id_unique" }
+);
+
 module.exports = mongoose.model("User", userSchema);

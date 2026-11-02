@@ -55,6 +55,22 @@ ${codeBlock(code)}
   };
 }
 
+/** Sign in / create account with a code (no password). */
+function loginCodeEmail({ name, code, minutes = 10 }) {
+  const hello = name ? `Hi ${escape(name)},` : "Hi,";
+  return {
+    subject: `${code} is your Kreedum Sports sign-in code`,
+    html: layout({
+      preheader: `Your sign-in code is ${code}. It expires in ${minutes} minutes.`,
+      body: `<p style="margin:0 0 8px;">${hello}</p>
+<p style="margin:0;">Enter this code on Kreedum Sports to sign in:</p>
+${codeBlock(code)}
+<p style="margin:0;color:${MUTED};font-size:13px;">The code expires in ${minutes} minutes. If you didn't try to sign in, you can ignore this email.</p>`,
+    }),
+    text: `${name ? `Hi ${name},` : "Hi,"}\n\nYour Kreedum Sports sign-in code is: ${code}\n\nIt expires in ${minutes} minutes. If you didn't try to sign in, ignore this email.`,
+  };
+}
+
 /** Forgot password: code to set a new password. */
 function passwordResetCodeEmail({ name, code, minutes = 10 }) {
   const hello = name ? `Hi ${escape(name)},` : "Hi,";
@@ -147,4 +163,4 @@ ${orderUrl ? `<p style="margin:24px 0 0;"><a href="${escape(orderUrl)}" style="d
   };
 }
 
-module.exports = { verificationCodeEmail, passwordResetCodeEmail, orderConfirmationEmail, escape };
+module.exports = { loginCodeEmail, verificationCodeEmail, passwordResetCodeEmail, orderConfirmationEmail, escape };

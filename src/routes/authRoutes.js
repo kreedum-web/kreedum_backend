@@ -13,6 +13,67 @@ const authMiddleware = require("../middleware/authMiddleware");
 
 /**
  * @swagger
+ * /api/v1/auth/options:
+ *   get:
+ *     summary: Sign-in methods the website should show (Google client id, email code)
+ *     tags: [Authentication]
+ */
+router.get("/options", authController.options);
+
+/**
+ * @swagger
+ * /api/v1/auth/email/start:
+ *   post:
+ *     summary: Email a 6-digit sign-in code (works for new and existing customers)
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email: { type: string, example: asha@gmail.com }
+ */
+router.post("/email/start", authController.startEmailLogin);
+
+/**
+ * @swagger
+ * /api/v1/auth/email/verify:
+ *   post:
+ *     summary: Sign in with the emailed code; creates the account the first time (returns token, isNew)
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email: { type: string }
+ *               code: { type: string, example: "482913" }
+ */
+router.post("/email/verify", authController.verifyEmailLogin);
+
+/**
+ * @swagger
+ * /api/v1/auth/google:
+ *   post:
+ *     summary: Continue with Google (credential = ID token from Google's button; returns token, isNew)
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               credential: { type: string }
+ */
+router.post("/google", authController.googleLogin);
+
+/**
+ * @swagger
  * /api/v1/auth/register:
  *   post:
  *     summary: Register a new customer

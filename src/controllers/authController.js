@@ -1,4 +1,5 @@
 const authService = require("../services/authService");
+const { googleClientId } = require("../utils/googleAuth");
 
 /** Errors with a status (HttpError) keep it and tell the website what happened via `code`. */
 function sendError(res, error, fallbackStatus) {
@@ -11,6 +12,44 @@ function sendError(res, error, fallbackStatus) {
 }
 
 class AuthController {
+
+  // GET /auth/options: which sign-in buttons the website shows
+  async options(req, res) {
+    return res.status(200).json({
+      success: true,
+      data: { googleClientId: googleClientId() || null, emailCode: true, phone: false },
+    });
+  }
+
+  // POST /auth/email/start { email }: email a sign-in code
+  async startEmailLogin(req, res) {
+    try {
+      const result = await authService.startEmailLogin(req.body.email);
+      return res.status(200).json({ success: true, message: "We've sent a 6-digit code to your email.", data: result });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
+
+  // POST /auth/email/verify { email, code }: sign in (creates the account the first time)
+  async verifyEmailLogin(req, res) {
+    try {
+      const result = await authService.verifyEmailLogin(req.body.email, req.body.code);
+      return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
+
+  // POST /auth/google { credential }: Continue with Google
+  async googleLogin(req, res) {
+    try {
+      const result = await authService.googleLogin(req.body.credential);
+      return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
 
   // ----------------------------
   // Register Customer

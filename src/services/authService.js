@@ -5,9 +5,13 @@ const HttpError = require("../utils/httpError");
 const emailCodeService = require("./emailCodeService");
 const { CODE_MINUTES } = require("./emailCodeService");
 const { sendMail } = require("../utils/mailer");
-const { verificationCodeEmail, passwordResetCodeEmail } = require("../emails/templates");
+const { loginCodeEmail, verificationCodeEmail, passwordResetCodeEmail } = require("../emails/templates");
+const { verifyGoogleCredential } = require("../utils/googleAuth");
 
 const MIN_PASSWORD = 8;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeEmail = (email) => String(email || "").toLowerCase().trim();
 
 function publicUser(user) {
   return {
@@ -17,7 +21,18 @@ function publicUser(user) {
     email: user.email,
     phone: user.phone,
     role: user.role,
+    avatarUrl: user.avatarUrl || "",
   };
+}
+
+function signedIn(user, extra = {}) {
+  return { user: publicUser(user), token: generateToken(user), ...extra };
+}
+
+function refuseInactive(user) {
+  if (user.isActive === false) {
+    throw new HttpError(403, "This account has been disabled. Please contact Kreedum Sports.", "ACCOUNT_DISABLED");
+  }
 }
 
 /** Send a sign-up code. Mail errors become a message the customer can act on. */
@@ -81,6 +96,89 @@ function serializeBirthday(value) {
 }
 
 class AuthService {
+
+  // ----------------------------
+  // Sign in or create an account with an emailed code (no password)
+  // ----------------------------
+  async startEmailLogin(email) {
+    const normalized = normalizeEmail(email);
+    if (!EMAIL_PATTERN.test(normalized)) {
+      throw new HttpError(400, "Enter a valid email address.", "INVALID_EMAIL");
+    }
+
+    const user = await User.findOne({ email: normalized });
+    if (user) refuseInactive(user);
+
+    const code = await emailCodeService.issue(normalized, "login");
+    try {
+      await sendMail({ to: normalized, ...loginCodeEmail({ name: user?.firstName, code, minutes: CODE_MINUTES }) });
+    } catch (error) {
+      console.error("Sign-in code email failed:", error.message);
+      throw new HttpError(502, "We couldn't send the code email right now. Please try again in a minute.", "EMAIL_SEND_FAILED");
+    }
+    return { sent: true, email: normalized };
+  }
+
+  /** The code is right: log in, creating the account the first time. */
+  async verifyEmailLogin(email, code) {
+    const normalized = normalizeEmail(email);
+    await emailCodeService.verify(normalized, "login", code);
+
+    let user = await User.findOne({ email: normalized });
+    const isNew = !user;
+    if (!user) {
+      user = await User.create({ email: normalized, emailVerified: true, emailVerifiedAt: new Date() });
+    } else {
+      refuseInactive(user);
+      // The code proves they own the email (also finishes an old unfinished sign-up).
+      if (user.emailVerified === false) {
+        user.emailVerified = true;
+        user.emailVerifiedAt = new Date();
+      }
+    }
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    return signedIn(user, { isNew });
+  }
+
+  // ----------------------------
+  // Continue with Google
+  // ----------------------------
+  async googleLogin(credential) {
+    const google = await verifyGoogleCredential(credential);
+
+    let user = await User.findOne({ googleId: google.googleId });
+    if (!user) user = await User.findOne({ email: google.email });
+    const isNew = !user;
+
+    if (!user) {
+      user = await User.create({
+        email: google.email,
+        firstName: google.firstName,
+        lastName: google.lastName,
+        avatarUrl: google.avatarUrl,
+        googleId: google.googleId,
+        emailVerified: true,
+        emailVerifiedAt: new Date(),
+      });
+    } else {
+      refuseInactive(user);
+      // Same email as an existing account: link Google to it.
+      user.googleId = google.googleId;
+      if (!user.firstName && google.firstName) user.firstName = google.firstName;
+      if (!user.lastName && google.lastName) user.lastName = google.lastName;
+      if (!user.avatarUrl && google.avatarUrl) user.avatarUrl = google.avatarUrl;
+      if (user.emailVerified === false) {
+        user.emailVerified = true;
+        user.emailVerifiedAt = new Date();
+      }
+    }
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    return signedIn(user, { isNew });
+  }
 
   // ----------------------------
   // Register Customer
@@ -239,6 +337,16 @@ const parsedBirthday = parseBirthday(birthday);
       throw new Error("Invalid email or password.");
     }
 
+    // Made with an email code or Google: there is no password to check.
+    if (!user.password) {
+      throw new HttpError(
+        400,
+        "This account doesn't use a password. Sign in with an email code or Google instead.",
+        "NO_PASSWORD",
+        { email: user.email }
+      );
+    }
+
     const passwordMatched = await bcrypt.compare(
       password,
       user.password
@@ -261,22 +369,11 @@ const parsedBirthday = parseBirthday(birthday);
       });
     }
 
+    refuseInactive(user);
     user.lastLoginAt = new Date();
     await user.save();
 
-    const token = generateToken(user);
-
-    return {
-      user: {
-        id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-      },
-      token,
-    };
+    return signedIn(user);
   }
 
   // ----------------------------
@@ -296,6 +393,7 @@ const parsedBirthday = parseBirthday(birthday);
       email: user.email,
       phone: user.phone,
       role: user.role,
+      avatarUrl: user.avatarUrl || "",
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
       birthday: serializeBirthday(user.birthday),

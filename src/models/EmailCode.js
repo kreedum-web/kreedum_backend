@@ -1,14 +1,14 @@
 const mongoose = require("mongoose");
 
 /**
- * A one-time code emailed to a customer (sign-up verification, password
- * reset). Only a hash of the code is stored. MongoDB deletes expired codes
+ * A one-time code emailed to a customer (sign-in, sign-up verification,
+ * password reset). Only a hash of the code is stored. MongoDB deletes expired codes
  * by itself (TTL index on expiresAt).
  */
 const emailCodeSchema = new mongoose.Schema(
   {
     email: { type: String, required: true, lowercase: true, trim: true },
-    purpose: { type: String, enum: ["verify_email", "reset_password"], required: true },
+    purpose: { type: String, enum: ["verify_email", "reset_password", "login"], required: true },
     codeHash: { type: String, required: true },
     expiresAt: { type: Date, required: true },
     attempts: { type: Number, default: 0 },
