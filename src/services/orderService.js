@@ -3,11 +3,27 @@ const mongoose = require("mongoose");
 const Cart = require("../models/Cart");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
-const { sendOrderConfirmation } = require("./orderEmailService");
+const User = require("../models/User");
+const { sendOrderConfirmation, sendOrderCancelled } = require("./orderEmailService");
 const { fillProfileFromAddress } = require("./profileFillService");
 const { findVariant, hasVariants, pricing } = require("../utils/productVariants");
 
 const MAX_CART_QUANTITY = 5;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Where the order's emails go: the account's email, else the one the
+ * customer types at checkout (phone sign-in accounts have no email).
+ */
+async function orderContactEmail(userId, typed) {
+  const user = await User.findById(userId).lean();
+  if (user?.email) return user.email;
+  const email = String(typed || "").trim().toLowerCase();
+  if (!EMAIL_PATTERN.test(email)) {
+    throw new Error("Please enter your email address so we can send your order updates.");
+  }
+  return email;
+}
 
 class OrderService {
 
@@ -16,6 +32,8 @@ class OrderService {
   // ==================================================
 
   async placeOrder(userId, payload) {
+
+    const contactEmail = await orderContactEmail(userId, payload?.contactEmail);
 
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -97,6 +115,8 @@ class OrderService {
 
             shippingAddress: payload.shippingAddress,
 
+            contactEmail,
+
             pricing: {
               subtotal,
               shippingCharge,
@@ -136,7 +156,7 @@ class OrderService {
       // In the background (the customer doesn't wait, and neither step can
       // affect the order): give a new account its name and phone from the
       // delivery address, then email the order confirmation.
-      fillProfileFromAddress(userId, payload.shippingAddress).then(() => sendOrderConfirmation(order[0], userId));
+      fillProfileFromAddress(userId, payload.shippingAddress, { contactEmail }).then(() => sendOrderConfirmation(order[0], userId));
 
       return order[0];
 
@@ -218,6 +238,9 @@ class OrderService {
 
     await order.save();
 
+    // Cancellation email, in the background (never affects the cancellation).
+    sendOrderCancelled(order, userId);
+
     return order;
   }
 
@@ -251,3 +274,5 @@ class OrderService {
 }
 
 module.exports = new OrderService();
+// For tests.
+module.exports.orderContactEmail = orderContactEmail;

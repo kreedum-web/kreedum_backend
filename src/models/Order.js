@@ -160,6 +160,15 @@ const orderSchema = new mongoose.Schema(
 
     shippingAddress: shippingAddressSchema,
 
+    // Where this order's emails go (confirmation, cancellation): the
+    // account's email, or the one typed at checkout by phone-only accounts.
+    contactEmail: {
+      type: String,
+      lowercase: true,
+      trim: true,
+      default: "",
+    },
+
     pricing: {
       subtotal: {
         type: Number,

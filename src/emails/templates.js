@@ -163,4 +163,55 @@ ${orderUrl ? `<p style="margin:24px 0 0;"><a href="${escape(orderUrl)}" style="d
   };
 }
 
-module.exports = { loginCodeEmail, verificationCodeEmail, passwordResetCodeEmail, orderConfirmationEmail, escape };
+/** The customer cancelled an order. */
+function orderCancelledEmail({ order, name }) {
+  const items = order.items || [];
+  const pricing = order.pricing || {};
+  const orderUrl = siteUrl() ? `${siteUrl()}/account/orders/${order._id}` : "";
+  const rows = items
+    .map(
+      (item) => `<tr>
+<td style="padding:8px 0;border-bottom:1px solid #EEF1F7;">
+  <div style="font-weight:bold;">${escape(item.name)}</div>
+  ${item.variantLabel ? `<div style="font-size:13px;color:${MUTED};">${escape(item.variantLabel)}</div>` : ""}
+</td>
+<td style="padding:8px 0;border-bottom:1px solid #EEF1F7;text-align:right;color:${MUTED};white-space:nowrap;">× ${item.quantity}</td>
+</tr>`
+    )
+    .join("");
+  const paid = order.paymentStatus === "PAID";
+
+  return {
+    subject: `Order cancelled — ${order.orderNumber}`,
+    html: layout({
+      preheader: `Your order ${order.orderNumber} has been cancelled.`,
+      body: `<p style="margin:0 0 8px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
+<p style="margin:0 0 18px;">Your order <strong>${escape(order.orderNumber)}</strong> has been cancelled as you asked. ${
+        paid
+          ? "Your payment will be refunded to the original payment method."
+          : "Nothing was charged, so there's nothing to pay."
+      }</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 12px;">${rows}</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="padding:4px 0;color:${MUTED};">Order total</td><td style="padding:4px 0;text-align:right;text-decoration:line-through;color:${MUTED};">${inr(pricing.total)}</td></tr>
+</table>
+<p style="margin:18px 0 0;color:${MUTED};font-size:14px;">Didn't cancel this? ${
+        siteUrl() ? `<a href="${escape(`${siteUrl()}/contact`)}" style="color:${BLUE};">Contact us</a>` : "Contact us"
+      } and we'll help.</p>
+${orderUrl ? `<p style="margin:20px 0 0;"><a href="${escape(orderUrl)}" style="display:inline-block;padding:12px 20px;border-radius:10px;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;">View order</a></p>` : ""}`,
+    }),
+    text: [
+      `${name ? `Hi ${name},` : "Hi,"}`,
+      "",
+      `Your order ${order.orderNumber} has been cancelled as you asked.`,
+      paid ? "Your payment will be refunded to the original payment method." : "Nothing was charged, so there's nothing to pay.",
+      "",
+      ...items.map((item) => `- ${item.name}${item.variantLabel ? ` (${item.variantLabel})` : ""} x ${item.quantity}`),
+      "",
+      `Order total (cancelled): ${inr(pricing.total)}`,
+      ...(orderUrl ? ["", `View order: ${orderUrl}`] : []),
+    ].join("\n"),
+  };
+}
+
+module.exports = { orderCancelledEmail, loginCodeEmail, verificationCodeEmail, passwordResetCodeEmail, orderConfirmationEmail, escape };

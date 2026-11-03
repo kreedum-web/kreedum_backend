@@ -23,6 +23,16 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Where order emails go for accounts without a sign-in email (phone
+    // sign-in). Typed at checkout and NOT verified, so it is never used to
+    // sign in: only to send order updates.
+    contactEmail: {
+      type: String,
+      lowercase: true,
+      trim: true,
+      default: "",
+    },
+
     // 10 digits, e.g. "9876543210".
     phone: {
       type: String,

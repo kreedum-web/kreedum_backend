@@ -23,6 +23,7 @@ function publicUser(user) {
     phone: user.phone,
     role: user.role,
     avatarUrl: user.avatarUrl || "",
+    contactEmail: user.contactEmail || "",
   };
 }
 
@@ -451,6 +452,7 @@ const parsedBirthday = parseBirthday(birthday);
       phone: user.phone,
       role: user.role,
       avatarUrl: user.avatarUrl || "",
+      contactEmail: user.contactEmail || "",
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
       birthday: serializeBirthday(user.birthday),
