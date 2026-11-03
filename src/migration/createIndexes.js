@@ -11,6 +11,7 @@ const Cart = require("../models/Cart");
 const Order = require("../models/Order");
 const Address = require("../models/Address");
 const ensureCartIndexes = require("../utils/ensureCartIndexes");
+const ensureUserIndexes = require("../utils/ensureUserIndexes");
 
 /**
  * Safely create an index.
@@ -145,14 +146,9 @@ async function createIndexes() {
     { name: "brand_name" }
   );
 
-  await safeCreateIndex(
-  User.collection,
-  { email: 1 },
-  {
-    unique: true,
-    name: "user_email_unique",
-  }
-);
+  // Email unique only for accounts that have one (phone sign-in accounts
+  // don't); also replaces the older user_email_unique index.
+  await ensureUserIndexes();
 
 // ===========================
 // WISHLIST

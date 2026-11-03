@@ -74,6 +74,49 @@ router.post("/google", authController.googleLogin);
 
 /**
  * @swagger
+ * /api/v1/auth/phone/firebase:
+ *   post:
+ *     summary: Sign in with a phone number verified by Firebase (idToken from Firebase; returns token, isNew)
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               idToken: { type: string }
+ */
+router.post("/phone/firebase", authController.firebasePhoneLogin);
+
+/**
+ * @swagger
+ * /api/v1/auth/phone/start:
+ *   post:
+ *     summary: SMS a 6-digit sign-in code (only when PHONE_PROVIDER is "sms")
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               phone: { type: string, example: "9876543210" }
+ */
+router.post("/phone/start", authController.startPhoneLogin);
+
+/**
+ * @swagger
+ * /api/v1/auth/phone/verify:
+ *   post:
+ *     summary: Sign in with the SMS code (only when PHONE_PROVIDER is "sms"; returns token, isNew)
+ *     tags: [Authentication]
+ */
+router.post("/phone/verify", authController.verifyPhoneLogin);
+
+/**
+ * @swagger
  * /api/v1/auth/register:
  *   post:
  *     summary: Register a new customer

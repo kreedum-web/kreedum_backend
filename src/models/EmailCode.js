@@ -7,8 +7,9 @@ const mongoose = require("mongoose");
  */
 const emailCodeSchema = new mongoose.Schema(
   {
+    // The email address, or "+91…" for a code sent by SMS (purpose phone_login).
     email: { type: String, required: true, lowercase: true, trim: true },
-    purpose: { type: String, enum: ["verify_email", "reset_password", "login"], required: true },
+    purpose: { type: String, enum: ["verify_email", "reset_password", "login", "phone_login"], required: true },
     codeHash: { type: String, required: true },
     expiresAt: { type: Date, required: true },
     attempts: { type: Number, default: 0 },

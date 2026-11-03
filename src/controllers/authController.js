@@ -1,5 +1,6 @@
 const authService = require("../services/authService");
 const { googleClientId } = require("../utils/googleAuth");
+const { phoneProvider, firebaseWebConfig } = require("../utils/phoneAuth");
 
 /** Errors with a status (HttpError) keep it and tell the website what happened via `code`. */
 function sendError(res, error, fallbackStatus) {
@@ -17,7 +18,13 @@ class AuthController {
   async options(req, res) {
     return res.status(200).json({
       success: true,
-      data: { googleClientId: googleClientId() || null, emailCode: true, phone: false },
+      data: {
+        googleClientId: googleClientId() || null,
+        emailCode: true,
+        // null: phone sign-in hidden · "firebase": website uses Firebase · "sms": our own SMS
+        phone: phoneProvider(),
+        firebase: phoneProvider() === "firebase" ? firebaseWebConfig() : null,
+      },
     });
   }
 
@@ -35,6 +42,36 @@ class AuthController {
   async verifyEmailLogin(req, res) {
     try {
       const result = await authService.verifyEmailLogin(req.body.email, req.body.code);
+      return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
+
+  // POST /auth/phone/firebase { idToken }: phone verified by Firebase
+  async firebasePhoneLogin(req, res) {
+    try {
+      const result = await authService.firebasePhoneLogin(req.body.idToken);
+      return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
+
+  // POST /auth/phone/start { phone }: SMS a code (own SMS provider)
+  async startPhoneLogin(req, res) {
+    try {
+      const result = await authService.startPhoneLogin(req.body.phone);
+      return res.status(200).json({ success: true, message: "We've sent a 6-digit code by SMS.", data: result });
+    } catch (error) {
+      return sendError(res, error, 400);
+    }
+  }
+
+  // POST /auth/phone/verify { phone, code }
+  async verifyPhoneLogin(req, res) {
+    try {
+      const result = await authService.verifyPhoneLogin(req.body.phone, req.body.code);
       return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
     } catch (error) {
       return sendError(res, error, 400);

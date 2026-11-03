@@ -16,18 +16,27 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Missing for accounts made with a phone number only.
     email: {
       type: String,
-      required: true,
-      unique: true,
       lowercase: true,
       trim: true,
     },
 
+    // 10 digits, e.g. "9876543210".
     phone: {
       type: String,
       default: "",
       trim: true,
+    },
+
+    // true once the customer signed in with an OTP sent to this phone.
+    phoneVerified: {
+      type: Boolean,
+    },
+
+    phoneVerifiedAt: {
+      type: Date,
     },
 
     birthday: {
@@ -85,9 +94,17 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+// One account per email, and per verified phone. Accounts without an email
+// (phone sign-in) aren't counted, which a plain unique index would do.
+// src/utils/ensureUserIndexes.js replaces the older email index.
 userSchema.index(
   { email: 1 },
-  { unique: true, name: "user_email_unique" }
+  { unique: true, partialFilterExpression: { email: { $type: "string" } }, name: "user_email_unique_v2" }
+);
+
+userSchema.index(
+  { phone: 1 },
+  { unique: true, partialFilterExpression: { phoneVerified: true }, name: "user_verified_phone_unique" }
 );
 userSchema.index(
   { googleId: 1 },

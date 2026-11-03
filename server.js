@@ -4,6 +4,8 @@ require("dotenv").config();
 const app = require("./src/app");
 const connectDatabase = require("./src/config/database");
 const ensureCartIndexes = require("./src/utils/ensureCartIndexes");
+const ensureUserIndexes = require("./src/utils/ensureUserIndexes");
+const { phoneProvider } = require("./src/utils/phoneAuth");
 const { transportName } = require("./src/utils/mailer");
 
 const PORT = process.env.PORT || 5000;
@@ -13,6 +15,7 @@ const PORT = process.env.PORT || 5000;
 async function startServer() {
   await connectDatabase();
   await ensureCartIndexes();
+  await ensureUserIndexes();
 
   app.listen(PORT, () => {
     console.log(`🚀 Kreedum API running on port ${PORT}`);
@@ -23,6 +26,9 @@ async function startServer() {
         ? "📧 Email: not configured — codes and order emails are only printed here"
         : `📧 Email: ${mail}`
     );
+    // Phone sign-in (see src/utils/phoneAuth.js).
+    const phone = phoneProvider();
+    console.log(phone ? `📱 Phone sign-in: ${phone}` : "📱 Phone sign-in: off (no Firebase or SMS settings)");
   });
 }
 

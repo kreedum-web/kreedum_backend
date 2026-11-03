@@ -7,6 +7,7 @@ const { CODE_MINUTES } = require("./emailCodeService");
 const { sendMail } = require("../utils/mailer");
 const { loginCodeEmail, verificationCodeEmail, passwordResetCodeEmail } = require("../emails/templates");
 const { verifyGoogleCredential } = require("../utils/googleAuth");
+const phoneAuth = require("../utils/phoneAuth");
 
 const MIN_PASSWORD = 8;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -139,6 +140,62 @@ class AuthService {
     user.lastLoginAt = new Date();
     await user.save();
 
+    return signedIn(user, { isNew });
+  }
+
+  // ----------------------------
+  // Sign in or create an account with a phone OTP
+  // ----------------------------
+
+  /** Firebase sent and checked the SMS; idToken proves the phone number. */
+  async firebasePhoneLogin(idToken) {
+    const phone = await phoneAuth.verifyFirebasePhoneToken(idToken);
+    return this.phoneSignIn(phone);
+  }
+
+  /** Our own SMS (PHONE_PROVIDER sms): send a code. */
+  async startPhoneLogin(rawPhone) {
+    if (phoneAuth.phoneProvider() !== "sms") {
+      throw new HttpError(400, "Phone codes are sent by Firebase on this site.", "PHONE_PROVIDER_FIREBASE");
+    }
+    const phone = phoneAuth.normalizeIndianPhone(rawPhone);
+    if (!phone) throw new HttpError(400, "Enter a valid 10-digit Indian mobile number.", "INVALID_PHONE");
+
+    const code = await emailCodeService.issue(phoneAuth.toE164(phone), "phone_login");
+    try {
+      await phoneAuth.sendSms({
+        to: phoneAuth.toE164(phone),
+        text: `${code} is your Kreedum Sports sign-in code. It expires in ${CODE_MINUTES} minutes. Don't share it with anyone.`,
+      });
+    } catch (error) {
+      console.error("Sign-in SMS failed:", error.message);
+      throw new HttpError(502, "We couldn't send the SMS right now. Please try again in a minute.", "SMS_SEND_FAILED");
+    }
+    return { sent: true, phone };
+  }
+
+  /** Our own SMS: check the code and sign in. */
+  async verifyPhoneLogin(rawPhone, code) {
+    if (phoneAuth.phoneProvider() !== "sms") {
+      throw new HttpError(400, "Phone codes are checked by Firebase on this site.", "PHONE_PROVIDER_FIREBASE");
+    }
+    const phone = phoneAuth.normalizeIndianPhone(rawPhone);
+    if (!phone) throw new HttpError(400, "Enter a valid 10-digit Indian mobile number.", "INVALID_PHONE");
+    await emailCodeService.verify(phoneAuth.toE164(phone), "phone_login", code);
+    return this.phoneSignIn(phone);
+  }
+
+  /** The phone number is proven: log in, creating the account the first time. */
+  async phoneSignIn(phone) {
+    let user = await User.findOne({ phone, phoneVerified: true });
+    const isNew = !user;
+    if (!user) {
+      user = await User.create({ phone, phoneVerified: true, phoneVerifiedAt: new Date() });
+    } else {
+      refuseInactive(user);
+    }
+    user.lastLoginAt = new Date();
+    await user.save();
     return signedIn(user, { isNew });
   }
 
