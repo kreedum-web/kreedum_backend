@@ -12,17 +12,18 @@ const MAX_CART_QUANTITY = 5;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Where the order's emails go: the account's email, else the one the
- * customer types at checkout (phone sign-in accounts have no email).
+ * Where the order's emails go: the email on the delivery address (the
+ * customer can change it per address), else the account's sign-in email.
+ * Phone accounts have no sign-in email, so their address must have one.
  */
-async function orderContactEmail(userId, typed) {
+async function orderContactEmail(userId, address, typed) {
+  for (const candidate of [address?.email, typed]) {
+    const email = String(candidate || "").trim().toLowerCase();
+    if (EMAIL_PATTERN.test(email)) return email;
+  }
   const user = await User.findById(userId).lean();
   if (user?.email) return user.email;
-  const email = String(typed || "").trim().toLowerCase();
-  if (!EMAIL_PATTERN.test(email)) {
-    throw new Error("Please enter your email address so we can send your order updates.");
-  }
-  return email;
+  throw new Error("Please add an email address to the delivery address so we can send your order updates.");
 }
 
 class OrderService {
@@ -33,7 +34,7 @@ class OrderService {
 
   async placeOrder(userId, payload) {
 
-    const contactEmail = await orderContactEmail(userId, payload?.contactEmail);
+    const contactEmail = await orderContactEmail(userId, payload?.shippingAddress, payload?.contactEmail);
 
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -156,7 +157,7 @@ class OrderService {
       // In the background (the customer doesn't wait, and neither step can
       // affect the order): give a new account its name and phone from the
       // delivery address, then email the order confirmation.
-      fillProfileFromAddress(userId, payload.shippingAddress, { contactEmail }).then(() => sendOrderConfirmation(order[0], userId));
+      fillProfileFromAddress(userId, payload.shippingAddress).then(() => sendOrderConfirmation(order[0], userId));
 
       return order[0];
 

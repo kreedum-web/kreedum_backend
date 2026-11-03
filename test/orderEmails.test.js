@@ -34,13 +34,15 @@ const order = (extra = {}) => ({
   ...extra,
 });
 
-test("checkout email: account email wins; phone-only accounts must type one", async () => {
+test("order email: the delivery address's email first, else the account's; phone accounts need one on the address", async () => {
   users.length = 0;
-  users.push({ _id: "e", email: "asha@gmail.com" }, { _id: "p", phone: "9876543210" });
-  assert.equal(await orderContactEmail("e", "other@x.com"), "asha@gmail.com");
-  assert.equal(await orderContactEmail("p", "  Ravi@Gmail.com "), "ravi@gmail.com");
-  await assert.rejects(orderContactEmail("p", ""), /enter your email/);
-  await assert.rejects(orderContactEmail("p", "ravi@"), /enter your email/);
+  users.push({ _id: "e", email: "asha@gmail.com" }, { _id: "p", phone: "9876543210", phoneVerified: true });
+  assert.equal(await orderContactEmail("e", { email: "Office@Asha.in " }), "office@asha.in");
+  assert.equal(await orderContactEmail("e", { email: "" }), "asha@gmail.com");
+  assert.equal(await orderContactEmail("p", { email: "ravi@gmail.com" }), "ravi@gmail.com");
+  assert.equal(await orderContactEmail("p", {}, "typed@gmail.com"), "typed@gmail.com"); // older website versions
+  await assert.rejects(orderContactEmail("p", { email: "" }), /add an email address to the delivery address/);
+  await assert.rejects(orderContactEmail("p", { email: "ravi@" }), /add an email address/);
 });
 
 test("a phone-only customer gets the order and cancellation emails at the address typed at checkout", async () => {
@@ -78,12 +80,12 @@ test("cancellation email: items, crossed-out total, nothing to pay for COD, refu
   assert.match(paid.text, /refunded/);
 });
 
-test("the checkout email is remembered on phone-only accounts (never on email accounts)", async () => {
+test("a skipped name is taken from the first delivery address; phone and email on it never touch the account", async () => {
   users.length = 0;
-  users.push(asDoc({ _id: "p", phone: "9876543210", firstName: "Ravi", contactEmail: "" }));
-  users.push(asDoc({ _id: "e", email: "asha@gmail.com", firstName: "Asha", phone: "9000000001", contactEmail: "" }));
-  assert.equal(await fillProfileFromAddress("p", { fullName: "Ravi" }, { contactEmail: "ravi@gmail.com" }), true);
-  assert.equal(users[0].contactEmail, "ravi@gmail.com");
-  assert.equal(await fillProfileFromAddress("e", { fullName: "Asha" }, { contactEmail: "asha@gmail.com" }), false);
-  assert.equal(users[1].contactEmail, "");
+  users.push(asDoc({ _id: "p", phone: "9876543210", phoneVerified: true, firstName: "", lastName: "" }));
+  users.push(asDoc({ _id: "e", email: "asha@gmail.com", firstName: "Asha", phone: "" }));
+  assert.equal(await fillProfileFromAddress("p", { fullName: "Ravi  Kumar Singh", phone: "9123456789", email: "x@y.com" }), true);
+  assert.deepEqual([users[0].firstName, users[0].lastName, users[0].phone, users[0].email], ["Ravi", "Kumar Singh", "9876543210", undefined]);
+  assert.equal(await fillProfileFromAddress("e", { fullName: "Someone Else", phone: "9123456789" }), false);
+  assert.deepEqual([users[1].firstName, users[1].phone], ["Asha", ""]);
 });

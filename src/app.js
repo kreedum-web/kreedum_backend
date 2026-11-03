@@ -27,6 +27,10 @@ const app = express();
 // Global Middleware
 // ===============================
 
+// Render puts one proxy in front of the app: trust it so req.ip is the
+// visitor's address (used by the sign-in rate limits).
+app.set("trust proxy", 1);
+
 app.use(cors());
 
 app.use(helmet());

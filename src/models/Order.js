@@ -72,6 +72,13 @@ const shippingAddressSchema = new mongoose.Schema(
       required: true,
     },
 
+    email: {
+      type: String,
+      lowercase: true,
+      trim: true,
+      default: "",
+    },
+
     addressLine1: {
       type: String,
       required: true,

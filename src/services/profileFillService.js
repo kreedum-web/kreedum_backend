@@ -1,44 +1,25 @@
 const User = require("../models/User");
 
 /**
- * Sign-up only asks for an email, Google or a phone number, so a new account
- * may have no name, phone or email. The order fills the gaps: name and phone
- * from the delivery address, and for phone-only accounts the email typed at
- * checkout (kept as contactEmail, for order emails only). Never throws.
+ * Customers may skip giving their name when they sign up. If they did, the
+ * name on their first delivery address becomes the account name. Phone and
+ * email on an address stay with the address: they never change the account
+ * or how it signs in. Never throws.
  */
-async function fillProfileFromAddress(userId, address, { contactEmail } = {}) {
+async function fillProfileFromAddress(userId, address) {
   try {
-    const user = await User.findById(userId);
-    if (!user) return false;
-
-    let changed = false;
     const fullName = String(address?.fullName || "").trim();
-    if (!user.firstName && fullName) {
-      const [first, ...rest] = fullName.split(/\s+/);
-      user.firstName = first;
-      if (!user.lastName) user.lastName = rest.join(" ");
-      changed = true;
-    }
+    if (!fullName) return false;
+    const user = await User.findById(userId);
+    if (!user || user.firstName) return false;
 
-    const phone = String(address?.phone || "").replace(/\D/g, "").slice(-10);
-    if (!user.phone && /^[6-9]\d{9}$/.test(phone)) {
-      const taken = await User.findOne({ phone, _id: { $ne: user._id } });
-      if (!taken) {
-        user.phone = phone;
-        changed = true;
-      }
-    }
-
-    // Remember it for next checkout (prefilled), latest one wins.
-    if (!user.email && contactEmail && user.contactEmail !== contactEmail) {
-      user.contactEmail = contactEmail;
-      changed = true;
-    }
-
-    if (changed) await user.save();
-    return changed;
+    const [first, ...rest] = fullName.split(/\s+/);
+    user.firstName = first;
+    if (!user.lastName) user.lastName = rest.join(" ");
+    await user.save();
+    return true;
   } catch (error) {
-    console.error("Couldn't copy name/phone from the address:", error.message);
+    console.error("Couldn't copy the name from the address:", error.message);
     return false;
   }
 }

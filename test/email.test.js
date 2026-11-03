@@ -158,7 +158,7 @@ test("sign-up emails a code instead of logging in; the code finishes sign-up and
   assert.equal(done.user.email, "asha@gmail.com");
   assert.equal(users[0].emailVerified, true);
 
-  await assert.rejects(signUp(), /Email already registered/);
+  await assert.rejects(signUp(), /already has an account/);
 });
 
 test("login before entering the code: refused with EMAIL_NOT_VERIFIED; after verifying it works", async () => {
@@ -208,7 +208,7 @@ test("forgot password: same answer for unknown emails; the code sets a new passw
   const done = await auth.resetPassword("asha@gmail.com", lastCode(), "brandnew123");
   assert.ok(done.token);
   assert.ok(await auth.login("asha@gmail.com", "brandnew123"));
-  await assert.rejects(auth.login("asha@gmail.com", "secret123"), /Invalid email or password/);
+  await assert.rejects(auth.login("asha@gmail.com", "secret123"), /Wrong password/);
 });
 
 // ---------------------------------------------------------------- order email

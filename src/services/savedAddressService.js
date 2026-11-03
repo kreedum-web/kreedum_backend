@@ -2,13 +2,46 @@ const mongoose = require("mongoose");
 
 const Address = require("../models/Address");
 
+const HttpError = require("../utils/httpError");
+
+// Only these come from the customer; the owner, default flag and status are
+// set here (a request can't move an address to another account).
+const FIELDS = ["label", "fullName", "phone", "email", "addressLine1", "addressLine2", "locality", "city", "district", "state", "country", "pincode"];
+const REQUIRED = ["fullName", "phone", "addressLine1", "locality", "city", "district", "state", "pincode"];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function cleanAddress(raw = {}, { requireAll }) {
+  const address = {};
+  for (const field of FIELDS) {
+    if (raw[field] !== undefined && raw[field] !== null) address[field] = String(raw[field]).trim();
+  }
+  if (requireAll && REQUIRED.some((field) => !address[field])) {
+    throw new HttpError(400, "Complete all required address fields.", "ADDRESS_INCOMPLETE");
+  }
+  if (address.phone !== undefined && !/^[6-9]\d{9}$/.test(address.phone)) {
+    throw new HttpError(400, "Enter a valid 10-digit mobile number.", "INVALID_PHONE");
+  }
+  if (address.pincode !== undefined && !/^[1-9]\d{5}$/.test(address.pincode)) {
+    throw new HttpError(400, "Enter a valid 6-digit PIN code.", "INVALID_PINCODE");
+  }
+  if (address.email !== undefined) {
+    address.email = address.email.toLowerCase();
+    if (address.email && !EMAIL_PATTERN.test(address.email)) {
+      throw new HttpError(400, "Enter a valid email address.", "INVALID_EMAIL");
+    }
+  }
+  return address;
+}
+
 class savedAddressService {
 
   // =====================================================
   // Create New Address
   // =====================================================
 
-  async createAddress(userId, payload) {
+  async createAddress(userId, rawPayload) {
+
+    const payload = cleanAddress(rawPayload, { requireAll: true });
 
     const existing = await Address.findOne({
       user: userId,
@@ -76,7 +109,9 @@ class savedAddressService {
   // Update Address
   // =====================================================
 
-  async updateAddress(userId, addressId, payload) {
+  async updateAddress(userId, addressId, rawPayload) {
+
+    const payload = cleanAddress(rawPayload, { requireAll: false });
 
     if (!mongoose.Types.ObjectId.isValid(addressId)) {
       throw new Error("Invalid address ID.");

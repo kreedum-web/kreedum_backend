@@ -27,6 +27,15 @@ const addressSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Where emails about orders to this address go. Only for delivery
+    // updates: never used to sign in. Older addresses don't have one.
+    email: {
+      type: String,
+      lowercase: true,
+      trim: true,
+      default: "",
+    },
+
     addressLine1: {
       type: String,
       required: true,

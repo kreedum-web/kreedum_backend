@@ -3,7 +3,7 @@ const { googleClientId } = require("../utils/googleAuth");
 const { phoneProvider, firebaseWebConfig } = require("../utils/phoneAuth");
 
 /** Errors with a status (HttpError) keep it and tell the website what happened via `code`. */
-function sendError(res, error, fallbackStatus) {
+function sendError(res, error, fallbackStatus = 400) {
   return res.status(error.status || fallbackStatus).json({
     success: false,
     message: error.message,
@@ -12,204 +12,85 @@ function sendError(res, error, fallbackStatus) {
   });
 }
 
-class AuthController {
+/** Wrap a service call: 200 with its result, or the error as JSON. */
+const handle = (run, message, status = 200) => async (req, res) => {
+  try {
+    const data = await run(req);
+    return res.status(status).json({ success: true, message: typeof message === "function" ? message(data) : message, data });
+  } catch (error) {
+    return sendError(res, error);
+  }
+};
 
-  // GET /auth/options: which sign-in buttons the website shows
-  async options(req, res) {
-    return res.status(200).json({
+const welcome = (data) => (data?.isNew ? "Welcome to Kreedum Sports!" : "Signed in.");
+
+class AuthController {
+  // GET /auth/options: which sign-in options the website shows
+  options = (req, res) =>
+    res.status(200).json({
       success: true,
       data: {
         googleClientId: googleClientId() || null,
-        emailCode: true,
-        // null: phone sign-in hidden · "firebase": website uses Firebase · "sms": our own SMS
+        // null: mobile numbers hidden · "firebase": website uses Firebase · "sms": our own SMS
         phone: phoneProvider(),
         firebase: phoneProvider() === "firebase" ? firebaseWebConfig() : null,
       },
     });
-  }
 
-  // POST /auth/email/start { email }: email a sign-in code
-  async startEmailLogin(req, res) {
-    try {
-      const result = await authService.startEmailLogin(req.body.email);
-      return res.status(200).json({ success: true, message: "We've sent a 6-digit code to your email.", data: result });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
+  // POST /auth/identify { identifier }: new or existing customer?
+  identify = handle((req) => authService.identify(req.body.identifier), "OK");
 
-  // POST /auth/email/verify { email, code }: sign in (creates the account the first time)
-  async verifyEmailLogin(req, res) {
-    try {
-      const result = await authService.verifyEmailLogin(req.body.email, req.body.code);
-      return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
+  // POST /auth/login { identifier | email, password }
+  login = handle((req) => authService.login(req.body.identifier ?? req.body.email, req.body.password), "Signed in.");
 
-  // POST /auth/phone/firebase { idToken }: phone verified by Firebase
-  async firebasePhoneLogin(req, res) {
-    try {
-      const result = await authService.firebasePhoneLogin(req.body.idToken);
-      return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
+  // POST /auth/register { email, password }: emails a code
+  register = handle(
+    (req) => authService.register(req.body),
+    "We've sent a 6-digit code to your email. Enter it to finish creating your account.",
+    201
+  );
 
-  // POST /auth/phone/start { phone }: SMS a code (own SMS provider)
-  async startPhoneLogin(req, res) {
-    try {
-      const result = await authService.startPhoneLogin(req.body.phone);
-      return res.status(200).json({ success: true, message: "We've sent a 6-digit code by SMS.", data: result });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
-
-  // POST /auth/phone/verify { phone, code }
-  async verifyPhoneLogin(req, res) {
-    try {
-      const result = await authService.verifyPhoneLogin(req.body.phone, req.body.code);
-      return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
-
-  // POST /auth/google { credential }: Continue with Google
-  async googleLogin(req, res) {
-    try {
-      const result = await authService.googleLogin(req.body.credential);
-      return res.status(200).json({ success: true, message: result.isNew ? "Welcome to Kreedum Sports!" : "Signed in.", data: result });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
-
-  // ----------------------------
-  // Register Customer
-  // ----------------------------
-  async register(req, res) {
-    try {
-      const result = await authService.register(req.body);
-
-      return res.status(201).json({
-        success: true,
-        message: "We've sent a 6-digit code to your email. Enter it to finish creating your account.",
-        data: result,
-      });
-
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
-
-  // ----------------------------
-  // Login Customer
-  // ----------------------------
-  async login(req, res) {
-    try {
-      const { email, password } = req.body;
-
-      const result = await authService.login(email, password);
-
-      return res.status(200).json({
-        success: true,
-        message: "Login successful.",
-        data: result,
-      });
-
-    } catch (error) {
-      return sendError(res, error, 401);
-    }
-  }
-
-  // POST /auth/verify-email { email, code }
-  async verifyEmail(req, res) {
-    try {
-      const result = await authService.verifyEmail(req.body.email, req.body.code);
-      return res.status(200).json({ success: true, message: "Email verified. Welcome to Kreedum Sports!", data: result });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
+  // POST /auth/verify-email { email, code }: finishes an email sign-up
+  verifyEmail = handle((req) => authService.verifyEmail(req.body.email, req.body.code), welcome);
 
   // POST /auth/resend-code { email }
-  async resendCode(req, res) {
-    try {
-      await authService.resendVerificationCode(req.body.email);
-      return res.status(200).json({ success: true, message: "If your account is waiting for verification, a new code is on its way." });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
+  resendCode = handle(
+    (req) => authService.resendVerificationCode(req.body.email),
+    "If your account is waiting for verification, a new code is on its way."
+  );
+
+  // POST /auth/register-phone { idToken | phone+code, password }
+  registerPhone = handle((req) => authService.registerPhone(req.body), welcome, 201);
+
+  // POST /auth/phone/start { phone }: own SMS provider only
+  startPhoneCode = handle((req) => authService.startPhoneCode(req.body.phone), "We've sent a 6-digit code by SMS.");
 
   // POST /auth/forgot-password { email }
-  async forgotPassword(req, res) {
-    try {
-      await authService.forgotPassword(req.body.email);
-      return res.status(200).json({ success: true, message: "If an account exists for this email, we've sent a 6-digit code to it." });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
+  forgotPassword = handle(
+    (req) => authService.forgotPassword(req.body.email),
+    "If an account exists for this email, we've sent a 6-digit code to it."
+  );
 
   // POST /auth/reset-password { email, code, password }
-  async resetPassword(req, res) {
-    try {
-      const result = await authService.resetPassword(req.body.email, req.body.code, req.body.password);
-      return res.status(200).json({ success: true, message: "Your password has been changed.", data: result });
-    } catch (error) {
-      return sendError(res, error, 400);
-    }
-  }
+  resetPassword = handle(
+    (req) => authService.resetPassword(req.body.email, req.body.code, req.body.password),
+    "Your password has been saved."
+  );
 
-  // ----------------------------
-  // Logged-in User Profile
-  // ----------------------------
-  async getProfile(req, res) {
-    try {
-      const profile = await authService.getProfile(req.user._id);
+  // POST /auth/reset-password-phone { idToken | phone+code, password }
+  resetPasswordWithPhone = handle((req) => authService.resetPasswordWithPhone(req.body), "Your password has been saved.");
 
-      return res.status(200).json({
-        success: true,
-        message: "Profile fetched successfully.",
-        data: profile,
-      });
+  // POST /auth/google { credential }
+  googleLogin = handle((req) => authService.googleLogin(req.body.credential), welcome);
 
-    } catch (error) {
-      return res.status(404).json({
-        success: false,
-        message: error.message,
-      });
-    }
-  }
+  // GET /auth/me
+  getProfile = handle((req) => authService.getProfile(req.user._id), "Profile fetched successfully.");
 
-  // ----------------------------
-  // Update Profile
-  // ----------------------------
-  async updateProfile(req, res) {
-    try {
-      const profile = await authService.updateProfile(
-        req.user._id,
-        req.body
-      );
+  // PUT /auth/profile
+  updateProfile = handle((req) => authService.updateProfile(req.user._id, req.body), "Profile updated successfully.");
 
-      return res.status(200).json({
-        success: true,
-        message: "Profile updated successfully.",
-        data: profile,
-      });
-
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
-    }
-  }
+  // PUT /auth/password { currentPassword?, newPassword, confirmPassword? }
+  changePassword = handle((req) => authService.changePassword(req.user._id, req.body), "Password saved.");
 }
 
 module.exports = new AuthController();

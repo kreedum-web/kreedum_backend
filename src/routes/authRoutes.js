@@ -3,219 +3,127 @@ const router = express.Router();
 
 const authController = require("../controllers/authController");
 const authMiddleware = require("../middleware/authMiddleware");
+const rateLimit = require("../middleware/rateLimit");
+
+// Per visitor (IP): requests that send an email/SMS, and password attempts.
+const sendsCode = rateLimit({ name: "codes", max: 8, minutes: 15, message: "Too many codes requested. Please wait 15 minutes and try again." });
+const checksCode = rateLimit({ name: "code-checks", max: 30, minutes: 15 });
+const passwordTries = rateLimit({ name: "logins", max: 20, minutes: 15, message: "Too many sign-in attempts. Please wait 15 minutes or reset your password." });
+const lookups = rateLimit({ name: "lookups", max: 60, minutes: 15 });
 
 /**
  * @swagger
  * tags:
  *   name: Authentication
- *   description: Customer Authentication APIs
+ *   description: |
+ *     Customers sign in with the email or mobile number they signed up with, plus a password
+ *     (or Continue with Google). A one-time code is sent only when creating an account or
+ *     setting / resetting a password.
  */
 
 /**
  * @swagger
  * /api/v1/auth/options:
  *   get:
- *     summary: Sign-in methods the website should show (Google client id, email code)
+ *     summary: Sign-in options the website should show (Google client id, mobile numbers via Firebase or SMS)
  *     tags: [Authentication]
  */
 router.get("/options", authController.options);
 
 /**
  * @swagger
- * /api/v1/auth/email/start:
+ * /api/v1/auth/identify:
  *   post:
- *     summary: Email a 6-digit sign-in code (works for new and existing customers)
+ *     summary: Is this email / mobile number already a customer? (returns type, exists, hasPassword)
  *     tags: [Authentication]
  *     requestBody:
- *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             properties:
- *               email: { type: string, example: asha@gmail.com }
+ *               identifier: { type: string, example: "asha@gmail.com or 9876543210" }
  */
-router.post("/email/start", authController.startEmailLogin);
-
-/**
- * @swagger
- * /api/v1/auth/email/verify:
- *   post:
- *     summary: Sign in with the emailed code; creates the account the first time (returns token, isNew)
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               email: { type: string }
- *               code: { type: string, example: "482913" }
- */
-router.post("/email/verify", authController.verifyEmailLogin);
-
-/**
- * @swagger
- * /api/v1/auth/google:
- *   post:
- *     summary: Continue with Google (credential = ID token from Google's button; returns token, isNew)
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               credential: { type: string }
- */
-router.post("/google", authController.googleLogin);
-
-/**
- * @swagger
- * /api/v1/auth/phone/firebase:
- *   post:
- *     summary: Sign in with a phone number verified by Firebase (idToken from Firebase; returns token, isNew)
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               idToken: { type: string }
- */
-router.post("/phone/firebase", authController.firebasePhoneLogin);
-
-/**
- * @swagger
- * /api/v1/auth/phone/start:
- *   post:
- *     summary: SMS a 6-digit sign-in code (only when PHONE_PROVIDER is "sms")
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               phone: { type: string, example: "9876543210" }
- */
-router.post("/phone/start", authController.startPhoneLogin);
-
-/**
- * @swagger
- * /api/v1/auth/phone/verify:
- *   post:
- *     summary: Sign in with the SMS code (only when PHONE_PROVIDER is "sms"; returns token, isNew)
- *     tags: [Authentication]
- */
-router.post("/phone/verify", authController.verifyPhoneLogin);
-
-/**
- * @swagger
- * /api/v1/auth/register:
- *   post:
- *     summary: Register a new customer
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - firstName
- *               - email
- *               - password
- *             properties:
- *               firstName:
- *                 type: string
- *                 example: Vibhor
- *               lastName:
- *                 type: string
- *                 example: Jain
- *               email:
- *                 type: string
- *                 example: vibhor@example.com
- *               phone:
- *                 type: string
- *                 example: "9876543210"
- *               password:
- *                 type: string
- *                 example: Password@123
- *     responses:
- *       201:
- *         description: Customer registered successfully.
- */
-router.post("/register", authController.register);
+router.post("/identify", lookups, authController.identify);
 
 /**
  * @swagger
  * /api/v1/auth/login:
  *   post:
- *     summary: Login customer
+ *     summary: Sign in with email or mobile number + password (no code)
  *     tags: [Authentication]
  *     requestBody:
- *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - email
- *               - password
  *             properties:
- *               email:
- *                 type: string
- *                 example: vibhor@example.com
- *               password:
- *                 type: string
- *                 example: Password@123
- *     responses:
- *       200:
- *         description: Login successful.
+ *               identifier: { type: string, example: "asha@gmail.com" }
+ *               password: { type: string }
  */
-router.post("/login", authController.login);
+router.post("/login", passwordTries, authController.login);
 
 /**
  * @swagger
- * /api/v1/auth/verify-email:
+ * /api/v1/auth/register:
  *   post:
- *     summary: Finish sign-up with the 6-digit code emailed to the customer (returns token)
+ *     summary: Create an account with email + password; emails a 6-digit code (finish with /auth/verify-email)
  *     tags: [Authentication]
  *     requestBody:
- *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             properties:
  *               email: { type: string }
- *               code: { type: string, example: "482913" }
+ *               password: { type: string }
  */
-router.post("/verify-email", authController.verifyEmail);
+router.post("/register", sendsCode, authController.register);
+
+/**
+ * @swagger
+ * /api/v1/auth/verify-email:
+ *   post:
+ *     summary: Finish an email sign-up with the emailed code (returns token, isNew)
+ *     tags: [Authentication]
+ */
+router.post("/verify-email", checksCode, authController.verifyEmail);
 
 /**
  * @swagger
  * /api/v1/auth/resend-code:
  *   post:
- *     summary: Email a new sign-up code (at most once a minute, 5 an hour)
+ *     summary: Email a new sign-up code
  *     tags: [Authentication]
  */
-router.post("/resend-code", authController.resendCode);
+router.post("/resend-code", sendsCode, authController.resendCode);
+
+/**
+ * @swagger
+ * /api/v1/auth/register-phone:
+ *   post:
+ *     summary: Create an account with mobile number + password after the SMS code (idToken from Firebase, or phone + code)
+ *     tags: [Authentication]
+ */
+router.post("/register-phone", checksCode, authController.registerPhone);
+
+/**
+ * @swagger
+ * /api/v1/auth/phone/start:
+ *   post:
+ *     summary: Send an SMS code with our own SMS provider (not used while Firebase sends the codes)
+ *     tags: [Authentication]
+ */
+router.post("/phone/start", sendsCode, authController.startPhoneCode);
 
 /**
  * @swagger
  * /api/v1/auth/forgot-password:
  *   post:
- *     summary: Email a password reset code
+ *     summary: Email a code to set or reset the password
  *     tags: [Authentication]
  */
-router.post("/forgot-password", authController.forgotPassword);
+router.post("/forgot-password", sendsCode, authController.forgotPassword);
 
 /**
  * @swagger
@@ -223,30 +131,35 @@ router.post("/forgot-password", authController.forgotPassword);
  *   post:
  *     summary: Set a new password with the emailed code (returns token)
  *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               email: { type: string }
- *               code: { type: string }
- *               password: { type: string }
  */
-router.post("/reset-password", authController.resetPassword);
+router.post("/reset-password", checksCode, authController.resetPassword);
+
+/**
+ * @swagger
+ * /api/v1/auth/reset-password-phone:
+ *   post:
+ *     summary: Set a new password after the SMS code (idToken from Firebase, or phone + code; returns token)
+ *     tags: [Authentication]
+ */
+router.post("/reset-password-phone", checksCode, authController.resetPasswordWithPhone);
+
+/**
+ * @swagger
+ * /api/v1/auth/google:
+ *   post:
+ *     summary: Continue with Google (credential = ID token from Google's button; returns token, isNew)
+ *     tags: [Authentication]
+ */
+router.post("/google", checksCode, authController.googleLogin);
 
 /**
  * @swagger
  * /api/v1/auth/me:
  *   get:
- *     summary: Get logged-in customer profile
+ *     summary: Logged-in customer (includes loginMethod, hasPassword)
  *     tags: [Authentication]
  *     security:
  *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Profile fetched successfully.
  */
 router.get("/me", authMiddleware, authController.getProfile);
 
@@ -254,35 +167,22 @@ router.get("/me", authMiddleware, authController.getProfile);
  * @swagger
  * /api/v1/auth/profile:
  *   put:
- *     summary: Update logged-in customer profile
+ *     summary: Update name, contact phone (not the sign-in number) and birthday
  *     tags: [Authentication]
  *     security:
  *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               firstName:
- *                 type: string
- *                 example: Vibhor
- *               lastName:
- *                 type: string
- *                 example: Jain
- *               phone:
- *                 type: string
- *                 example: "9999999999"
- *               birthday:
- *                 type: string
- *                 format: date
- *                 nullable: true
- *                 example: "1995-08-13"
- *     responses:
- *       200:
- *         description: Profile updated successfully.
  */
 router.put("/profile", authMiddleware, authController.updateProfile);
+
+/**
+ * @swagger
+ * /api/v1/auth/password:
+ *   put:
+ *     summary: Change the password (currentPassword needed if one is set) or set the first one
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.put("/password", authMiddleware, passwordTries, authController.changePassword);
 
 module.exports = router;
