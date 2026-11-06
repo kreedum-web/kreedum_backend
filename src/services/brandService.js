@@ -7,7 +7,8 @@ class BrandService {
   // Get all brands with product counts
   async getAllBrands() {
     const [brands, images] = await Promise.all([
-      Brand.find({}).sort({ name: 1 }).lean(),
+      // Inactive brands (hidden in src/config/brandRules.js, or no products) stay off the site.
+      Brand.find({ isActive: { $ne: false } }).sort({ name: 1 }).lean(),
       getCatalogImages(),
     ]);
 
@@ -33,7 +34,7 @@ class BrandService {
 
   // Get brand by slug
   async getBrandBySlug(slug) {
-    const brand = await Brand.findOne({ slug }).lean();
+    const brand = await Brand.findOne({ slug, isActive: { $ne: false } }).lean();
 
     if (!brand) return null;
 

@@ -294,6 +294,13 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
 
+    // "brand-rule" when hidden because its brand is in hiddenBrands
+    // (src/config/brandRules.js), so it can be shown again later.
+    hiddenBy: {
+      type: String,
+      default: "",
+    },
+
     // =====================================================
     // MARKETING FLAGS
     // =====================================================

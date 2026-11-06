@@ -180,6 +180,7 @@ class HomepageService {
   // ----------------------------
   async getPopularBrands(limit = 8) {
     const brands = await Brand.aggregate([
+      { $match: { isActive: { $ne: false } } },
       {
         $lookup: {
           from: "products",
@@ -226,7 +227,7 @@ class HomepageService {
         isActive: true,
       }),
       Category.countDocuments(),
-      Brand.countDocuments(),
+      Brand.countDocuments({ isActive: { $ne: false } }),
     ]);
 
     return {

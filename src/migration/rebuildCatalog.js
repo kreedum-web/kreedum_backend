@@ -44,6 +44,7 @@ const extractSpecifications = require("../utils/extractSpecifications");
 const { variantsFromSupplier } = require("../utils/productVariants");
 const { productImageUrls, isOwnImage, withOwnImages } = require("../utils/productImages");
 const ImageAsset = require("../models/ImageAsset");
+const { isHiddenBrand, applyRenameToSupplierProduct } = require("../utils/brandRules");
 
 const SUPPLIER = "metrosports";
 const DEFAULT_AVAILABILITY = "Contact Kreedum Sports for product availability.";
@@ -99,10 +100,13 @@ function uniqueSlug(base, url, used) {
  * @param {object} existing current KreedumCommerce product with the same sourceUrl, if any
  * @param {Set} usedSlugs   website slugs already taken
  */
-function buildProduct(sp, tree, existing, usedSlugs, issues) {
-  const leaf = leafSlug(sp.categorySlug);
+function buildProduct(original, tree, existing, usedSlugs, issues) {
+  const leaf = leafSlug(original.categorySlug);
   const node = tree.get(leaf);
-  const categoryPath = node?.path?.length ? node.path : sp.categoryPath || [];
+  const categoryPath = node?.path?.length ? node.path : original.categoryPath || [];
+
+  // src/config/brandRules.js: products we sell under our own name.
+  const sp = applyRenameToSupplierProduct(original, categoryPath);
 
   if (!node) issues.push({ code: "category_not_in_menu", url: sp.url, category: sp.categorySlug });
 
@@ -136,6 +140,9 @@ function buildProduct(sp, tree, existing, usedSlugs, issues) {
   let visibility = brand && node ? "published" : "hidden";
   if (existing?.visibility === "draft") visibility = "draft"; // set by hand, keep it
   if (!active) visibility = "hidden";
+  // src/config/brandRules.js: brands kept in the database but not on the website.
+  const hiddenByBrand = Boolean(brand) && isHiddenBrand(generateSlug(brand));
+  if (hiddenByBrand) visibility = "hidden";
 
   if (!brand) issues.push({ code: "no_brand_hidden", url: sp.url });
 
@@ -194,6 +201,7 @@ function buildProduct(sp, tree, existing, usedSlugs, issues) {
       },
 
       visibility,
+      hiddenBy: hiddenByBrand ? "brand-rule" : "",
       isActive: active,
       ...(priceOnRequest ? { stockStatus: "enquiry_only" } : {}),
     },
