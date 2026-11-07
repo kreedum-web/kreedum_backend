@@ -9,7 +9,7 @@ module.exports = {
   // Kept in the database but not shown on the website (not partners yet).
   // To show a brand again, remove it here and run brands:apply.
   // Use the brand's slug: lowercase, spaces → "-".
-  hiddenBrands: ["powermax-fitness", "zorex-fitness","concept2"],
+  hiddenBrands: ["powermax-fitness", "zorex-fitness","concept2","everise-fitness","assault-fitness"],
 
   // Products sold under our own name. "inCategories" limits a rule to products
   // whose category path has a slug containing one of these words.
