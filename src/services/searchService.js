@@ -1,5 +1,12 @@
 const Product = require('../models/Product');
 
+/**
+ * Text typed by a customer, safe to use inside a regular expression: symbols
+ * like \ ( [ * + ? match themselves instead of breaking the search
+ * ("Regular expression is invalid" from MongoDB).
+ */
+const escapeRegex = (value) => String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 class SearchService {
   async searchProducts(queryParams) {
     const {
@@ -30,7 +37,7 @@ class SearchService {
     if (brand) {
   filter.$or = [
     { brandSlug: brand },
-    { brand: new RegExp(`^${brand}$`, "i") }
+    { brand: new RegExp(`^${escapeRegex(brand)}$`, "i") }
   ];
 }
 
@@ -118,12 +125,13 @@ const currentSort =
 
   // Autocomplete Suggestions
   async getSuggestions(keyword) {
-    if (!keyword || keyword.length < 2) return [];
+    const text = String(keyword ?? '').trim().slice(0, 100);
+    if (text.length < 2) return [];
 
     const products = await Product.find(
       {
         name: {
-          $regex: keyword,
+          $regex: escapeRegex(text),
           $options: 'i',
         },
         visibility: 'published',
@@ -159,3 +167,4 @@ const currentSort =
 }
 
 module.exports = new SearchService();
+module.exports.escapeRegex = escapeRegex;
