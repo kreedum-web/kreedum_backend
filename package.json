@@ -18,7 +18,8 @@
     "content:seed": "node src/migration/seedSiteContent.js",
     "images:folders": "node src/migration/organizeImageFolders.js",
     "gmail:token": "node src/scripts/gmailToken.js",
-    "brands:apply": "node src/migration/applyBrandRules.js"
+    "brands:apply": "node src/migration/applyBrandRules.js",
+    "db:copy-catalog": "node src/scripts/copyCatalog.js"
   },
   "keywords": [],
   "author": "",

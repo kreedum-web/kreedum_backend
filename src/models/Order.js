@@ -211,7 +211,8 @@ const orderSchema = new mongoose.Schema(
 
     paymentStatus: {
       type: String,
-      enum: ["PENDING", "PAID", "FAILED", "REFUNDED"],
+      // REFUND_INITIATED: refund sent to Cashfree, waiting for the bank.
+      enum: ["PENDING", "PAID", "FAILED", "REFUND_INITIATED", "REFUNDED"],
       default: "PENDING",
       index: true,
     },
@@ -219,6 +220,8 @@ const orderSchema = new mongoose.Schema(
     orderStatus: {
       type: String,
       enum: [
+        // Online payment chosen, not paid yet (cancelled by itself after an hour).
+        "AWAITING_PAYMENT",
         "PENDING",
         "CONFIRMED",
         "PACKED",
@@ -241,6 +244,22 @@ const orderSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+    },
+
+    // Online payment through Cashfree (paymentMethod ONLINE).
+    payment: {
+      gateway: { type: String, default: "" },          // "cashfree"
+      gatewayOrderId: { type: String, default: "", index: true }, // Cashfree's order_id (ours)
+      sessionId: { type: String, default: "" },        // payment_session_id for the checkout
+      sessionExpiresAt: { type: Date },
+      paymentId: { type: String, default: "" },        // cf_payment_id of the successful payment
+      method: { type: String, default: "" },           // upi, credit_card, net_banking …
+      paidAt: { type: Date },
+      lastFailure: { type: String, default: "" },
+      expired: { type: Boolean, default: false },      // not paid in time → cancelled
+      refundId: { type: String, default: "" },
+      refundStatus: { type: String, default: "" },     // PENDING, SUCCESS, FAILED, NOT_STARTED
+      refundedAt: { type: Date },
     },
   },
   {

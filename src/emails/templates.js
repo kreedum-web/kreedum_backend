@@ -93,7 +93,12 @@ function orderConfirmationEmail({ order, name }) {
   const pricing = order.pricing || {};
   const address = order.shippingAddress || {};
   const orderUrl = siteUrl() ? `${siteUrl()}/account/orders/${order._id}` : "";
-  const payment = order.paymentMethod === "COD" ? "Cash on delivery" : order.paymentMethod || "";
+  const payment =
+    order.paymentMethod === "COD"
+      ? "Cash on delivery"
+      : order.paymentStatus === "PAID"
+        ? `Paid online${order.payment?.method ? ` (${String(order.payment.method).replace(/_/g, " ")})` : ""}`
+        : order.paymentMethod || "";
 
   const rows = items
     .map(
@@ -179,7 +184,8 @@ function orderCancelledEmail({ order, name }) {
 </tr>`
     )
     .join("");
-  const paid = order.paymentStatus === "PAID";
+  // Paid online: the refund has been started (or is being sent) to the same account.
+  const paid = ["PAID", "REFUND_INITIATED", "REFUNDED"].includes(order.paymentStatus);
 
   return {
     subject: `Order cancelled — ${order.orderNumber}`,
@@ -188,7 +194,7 @@ function orderCancelledEmail({ order, name }) {
       body: `<p style="margin:0 0 8px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
 <p style="margin:0 0 18px;">Your order <strong>${escape(order.orderNumber)}</strong> has been cancelled as you asked. ${
         paid
-          ? "Your payment will be refunded to the original payment method."
+          ? "Your full payment is being refunded to the same account or card you paid with. Banks usually take 5–7 working days."
           : "Nothing was charged, so there's nothing to pay."
       }</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 12px;">${rows}</table>
@@ -204,7 +210,7 @@ ${orderUrl ? `<p style="margin:20px 0 0;"><a href="${escape(orderUrl)}" style="d
       `${name ? `Hi ${name},` : "Hi,"}`,
       "",
       `Your order ${order.orderNumber} has been cancelled as you asked.`,
-      paid ? "Your payment will be refunded to the original payment method." : "Nothing was charged, so there's nothing to pay.",
+      paid ? "Your full payment is being refunded to the same account or card you paid with. Banks usually take 5-7 working days." : "Nothing was charged, so there's nothing to pay.",
       "",
       ...items.map((item) => `- ${item.name}${item.variantLabel ? ` (${item.variantLabel})` : ""} x ${item.quantity}`),
       "",

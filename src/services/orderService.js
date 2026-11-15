@@ -6,6 +6,8 @@ const Order = require("../models/Order");
 const User = require("../models/User");
 const { sendOrderConfirmation, sendOrderCancelled } = require("./orderEmailService");
 const { fillProfileFromAddress } = require("./profileFillService");
+const paymentService = require("./paymentService");
+const { cashfreeConfig } = require("../utils/cashfree");
 const { findVariant, hasVariants, pricing } = require("../utils/productVariants");
 
 const MAX_CART_QUANTITY = 5;
@@ -35,6 +37,13 @@ class OrderService {
   async placeOrder(userId, payload) {
 
     const contactEmail = await orderContactEmail(userId, payload?.shippingAddress, payload?.contactEmail);
+
+    // COD, or ONLINE (paid through Cashfree right after the order is placed).
+    const paymentMethod = String(payload?.paymentMethod || "COD").toUpperCase() === "COD" ? "COD" : "ONLINE";
+    if (paymentMethod === "ONLINE" && !cashfreeConfig()) {
+      throw new Error("Online payment isn't available right now. Please choose cash on delivery.");
+    }
+    const online = paymentMethod === "ONLINE";
 
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -126,38 +135,37 @@ class OrderService {
               total: grandTotal,
             },
 
-            paymentMethod: payload.paymentMethod || "COD",
+            paymentMethod,
 
-            paymentStatus:
-              payload.paymentMethod === "COD"
-                ? "PENDING"
-                : "PENDING",
+            paymentStatus: "PENDING",
 
-            orderStatus: "PENDING",
+            // Online: not an order until it's paid (see paymentService).
+            orderStatus: online ? "AWAITING_PAYMENT" : "PENDING",
 
             notes: payload.notes || "",
 
             statusHistory: [
-              {
-                status: "PENDING",
-                updatedAt: new Date(),
-                note: "Order placed successfully.",
-              },
+              online
+                ? { status: "AWAITING_PAYMENT", updatedAt: new Date(), note: "Waiting for online payment." }
+                : { status: "PENDING", updatedAt: new Date(), note: "Order placed successfully." },
             ],
           },
         ],
         { session }
       );
 
-      await Cart.deleteMany({ user: userId }).session(session);
+      // Online orders keep the cart until the payment succeeds, so a failed
+      // or abandoned payment can simply be tried again.
+      if (!online) await Cart.deleteMany({ user: userId }).session(session);
 
       await session.commitTransaction();
       session.endSession();
 
       // In the background (the customer doesn't wait, and neither step can
-      // affect the order): give a new account its name and phone from the
-      // delivery address, then email the order confirmation.
-      fillProfileFromAddress(userId, payload.shippingAddress).then(() => sendOrderConfirmation(order[0], userId));
+      // affect the order): give a new account its name from the delivery
+      // address, then email the order confirmation. Online orders get both
+      // once the payment succeeds.
+      if (!online) fillProfileFromAddress(userId, payload.shippingAddress).then(() => sendOrderConfirmation(order[0], userId));
 
       return order[0];
 
@@ -174,6 +182,8 @@ class OrderService {
 
   async getMyOrders(userId) {
 
+    await paymentService.expireUnpaidOrders({ userId });
+
     const orders = await Order.find({ user: userId })
       .sort({ createdAt: -1 })
       .lean();
@@ -186,6 +196,8 @@ class OrderService {
   // ==================================================
 
   async getOrderDetails(userId, orderId) {
+
+    await paymentService.expireUnpaidOrders({ userId });
 
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
       throw new Error("Invalid order ID.");
@@ -222,10 +234,7 @@ class OrderService {
       throw new Error("Order not found.");
     }
 
-    if (
-      order.orderStatus !== "PENDING" &&
-      order.orderStatus !== "CONFIRMED"
-    ) {
+    if (!["AWAITING_PAYMENT", "PENDING", "CONFIRMED"].includes(order.orderStatus)) {
       throw new Error("Order cannot be cancelled.");
     }
 
@@ -238,6 +247,9 @@ class OrderService {
     });
 
     await order.save();
+
+    // Paid online: full refund through Cashfree straight away.
+    await paymentService.refundOrder(order);
 
     // Cancellation email, in the background (never affects the cancellation).
     sendOrderCancelled(order, userId);

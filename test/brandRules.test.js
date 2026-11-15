@@ -88,7 +88,13 @@ test("live catalogue: hides, renames (with a new web address) and shows again wh
   assert.deepEqual([again.hide.length, again.unhide.length, again.renames.length], [0, 0, 0]);
 });
 
-test("catalogue rebuild follows the same rules, so it never undoes them", () => {
+test("catalogue rebuild follows the same rules, so it never undoes them", (t) => {
+  // The rebuild reads src/config/brandRules.js: use this test's rules while it runs,
+  // so editing the real list never breaks the test.
+  const live = require("../src/config/brandRules");
+  const saved = { hiddenBrands: live.hiddenBrands, renamedBrands: live.renamedBrands };
+  Object.assign(live, rules);
+  t.after(() => Object.assign(live, saved));
   const categories = [
     { slug: "outdoor-gym", name: "Outdoor Gym", level: 1, path: ["outdoor-gym"] },
     { slug: "outdoor-gym-equipment", name: "Outdoor Gym Equipment", level: 2, parentSlug: "outdoor-gym", path: ["outdoor-gym", "outdoor-gym-equipment"] },
@@ -111,4 +117,15 @@ test("catalogue rebuild follows the same rules, so it never undoes them", () => 
   assert.equal(treadmill.brand, "Everise Fitness");
   assert.deepEqual(plan.brands.map((b) => b.slug).sort(), ["everise-fitness", "kreedum"]);
   assert.deepEqual(plan.staleBrands, ["powermax-fitness"]); // → set inactive, kept in the database
+});
+
+test("a brand can be hidden and still have its outdoor gym products sold as Kreedum", () => {
+  const both = { ...rules, hiddenBrands: [...rules.hiddenBrands, "everise-fitness"] };
+  const products = [
+    product({ slug: "everise-air-walker", name: "Everise Fitness Air Walker", brand: "Everise Fitness", brandSlug: "everise-fitness", categoryPath: ["outdoor-gym"] }),
+    product({ slug: "everise-treadmill", name: "Everise Fitness Treadmill", brand: "Everise Fitness", brandSlug: "everise-fitness", categoryPath: ["cardio"] }),
+  ];
+  const plan = planBrandRules(products, both);
+  assert.deepEqual(plan.renames.map((r) => r.$set.name), ["Kreedum Air Walker"]);
+  assert.deepEqual(plan.hide.map((p) => p.slug), ["everise-treadmill"]);
 });

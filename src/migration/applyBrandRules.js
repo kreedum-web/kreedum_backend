@@ -34,18 +34,22 @@ function planBrandRules(products, rules = RULES) {
   const takenSlugs = new Set(products.map((p) => p.slug));
 
   for (const p of products) {
+    // Renamed first: Everise outdoor gym products are sold as Kreedum even
+    // when Everise itself is hidden.
+    const rule = renameRuleFor(p.brandSlug, p.categoryPath || [], rules);
+    const brandSlug = rule ? generateSlug(rule.to) : p.brandSlug;
+
     // ---------- hidden brands
-    if (isHiddenBrand(p.brandSlug, rules)) {
+    if (isHiddenBrand(brandSlug, rules)) {
       if (p.visibility !== "hidden" || p.hiddenBy !== "brand-rule") hide.push(p);
       continue;
     }
     if (p.hiddenBy === "brand-rule") unhide.push(p);
 
     // ---------- renamed brands
-    const rule = renameRuleFor(p.brandSlug, p.categoryPath || [], rules);
     if (!rule) continue;
 
-    const $set = { brand: rule.to, brandSlug: generateSlug(rule.to) };
+    const $set = { brand: rule.to, brandSlug };
     for (const field of TEXT_FIELDS) if (p[field] !== undefined) $set[field] = rebrand(p[field], rule);
     $set.searchKeywords = [
       ...new Set([

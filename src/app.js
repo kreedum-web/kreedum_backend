@@ -20,6 +20,7 @@ const addressRoutes = require("./routes/addressRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const savedAddressRoutes = require("./routes/savedAddressRoutes");
 const profileRoutes = require("./routes/profileRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 
 const app = express();
 
@@ -37,7 +38,15 @@ app.use(helmet());
 
 app.use(compression());
 
-app.use(express.json({ limit: "10mb" }));
+app.use(
+  express.json({
+    limit: "10mb",
+    // Keep the exact text too: Cashfree's webhook signature is checked on it.
+    verify: (req, res, buffer) => {
+      if (req.originalUrl.startsWith("/api/v1/payments/cashfree/webhook")) req.rawBody = buffer.toString("utf8");
+    },
+  })
+);
 
 app.use(express.urlencoded({ extended: true }));
 
@@ -101,6 +110,7 @@ app.use("/api/v1/address", addressRoutes);
 app.use("/api/v1/orders", orderRoutes);
 app.use("/api/v1/addresses", savedAddressRoutes)
 app.use("/api/v1/profile", profileRoutes);
+app.use("/api/v1/payments", paymentRoutes);
 
 // ===============================
 // 404 Handler
