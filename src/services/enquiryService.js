@@ -1,18 +1,13 @@
 const Enquiry = require("../models/Enquiry");
 const HttpError = require("../utils/httpError");
-const { sendMail } = require("../utils/mailer");
-const { bulkEnquiryEmail, enquiryReceivedEmail } = require("../emails/templates");
 
 /**
- * Bulk enquiries ("Get a quote" on the website). No sign-in needed.
- *
- * .env:
- *   ENQUIRY_EMAIL=kreedumsports.official@gmail.com   where new enquiries are sent
- *                                                    (several: comma-separated)
+ * Bulk enquiries ("Bulk Enquiry" on the website). No sign-in needed.
+ * Saved here when the customer presses "Send enquiry"; the website then
+ * opens WhatsApp with the same details for them to send to us.
  */
-const DEFAULT_TO = "kreedumsports.official@gmail.com";
 
-// The choices on the form (also checked here, so the email stays tidy).
+// The choices on the form (also checked here, so the saved data stays tidy).
 const OPTIONS = {
   facilityType: [
     "Commercial Gym",
@@ -41,14 +36,6 @@ const OPTIONS = {
 
 const clip = (value, max) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function recipients(env = process.env) {
-  return (env.ENQUIRY_EMAIL || DEFAULT_TO)
-    .split(",")
-    .map((address) => address.trim())
-    .filter(Boolean)
-    .join(", ");
-}
 
 /** Clean what the form sent; throws 400 with a message per field. */
 function cleanEnquiry(body = {}) {
@@ -83,39 +70,22 @@ function cleanEnquiry(body = {}) {
 }
 
 /**
- * Save the enquiry and email it to the team. The customer gets a short
- * "we've got it" email when they gave an address. Email problems never fail
- * the request: the enquiry is saved either way.
+ * Save the enquiry. `user` is the signed-in customer (or null).
+ * @returns {{ id: string|null, signedIn: boolean }}
  */
-async function submitEnquiry(body, { ip = "" } = {}) {
+async function submitEnquiry(body, { user = null, ip = "" } = {}) {
   // Bots fill in every field, including this hidden one.
-  if (clip(body?.website, 200)) return { id: null, emailSent: false };
+  if (clip(body?.website, 200)) return { id: null, signedIn: false };
 
   const data = cleanEnquiry(body);
-  const enquiry = await Enquiry.create({ ...data, ip });
-
-  let emailSent = false;
-  try {
-    const result = await sendMail({
-      to: recipients(),
-      ...bulkEnquiryEmail({ enquiry: { ...data, createdAt: enquiry.createdAt } }),
-      ...(data.email ? { replyTo: data.email } : {}),
-    });
-    emailSent = Boolean(result?.sent);
-  } catch (error) {
-    console.error("Bulk enquiry email failed:", error.message);
-  }
-
-  if (data.email) {
-    sendMail({ to: data.email, ...enquiryReceivedEmail({ name: data.name.split(" ")[0] }) }).catch((error) =>
-      console.error("Enquiry confirmation email failed:", error.message)
-    );
-  }
-
-  if (emailSent) {
-    await Enquiry.updateOne({ _id: enquiry._id }, { $set: { emailSent: true } }).catch(() => {});
-  }
-  return { id: String(enquiry._id), emailSent };
+  const enquiry = await Enquiry.create({
+    ...data,
+    signedIn: Boolean(user),
+    user: user?._id || null,
+    accountLogin: user ? user.email || user.phone || "" : "",
+    ip,
+  });
+  return { id: String(enquiry._id), signedIn: Boolean(user) };
 }
 
-module.exports = { submitEnquiry, cleanEnquiry, recipients, OPTIONS };
+module.exports = { submitEnquiry, cleanEnquiry, OPTIONS };

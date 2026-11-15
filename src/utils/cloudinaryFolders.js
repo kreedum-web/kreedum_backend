@@ -5,6 +5,7 @@
  *   kreedum/homepage/hero   home page hero / offer banners
  *   kreedum/leaders         About Us leadership photos
  *   kreedum/clients         client logos (home page strip)
+ *   kreedum/brands          brand logos (Brands page, menus) (npm run brands:logos)
  *
  * Each kind is stored at most `storeMax` px and delivered to customers as
  * WebP / AVIF at most `deliverMax` px.
@@ -21,6 +22,7 @@ const KINDS = {
   hero: { folder: "kreedum/homepage/hero", storeMax: 2400, deliverMax: 1920 },
   leaders: { folder: "kreedum/leaders", storeMax: 1200, deliverMax: 800 },
   clients: { folder: "kreedum/clients", storeMax: 600, deliverMax: 400 },
+  brands: { folder: "kreedum/brands", storeMax: 800, deliverMax: 600 },
 };
 
 /** Media Library folder for an image, from its name: kreedum/products/2025/09/x -> kreedum/products. */

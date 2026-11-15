@@ -4,17 +4,17 @@ class EnquiryController {
   /** POST /api/v1/enquiries — bulk enquiry form (no sign-in needed). */
   async create(req, res) {
     try {
-      const data = await enquiryService.submitEnquiry(req.body, { ip: req.ip });
+      const data = await enquiryService.submitEnquiry(req.body, { user: req.user || null, ip: req.ip });
       return res.status(201).json({
         success: true,
-        message: "Thank you! Our team will call you shortly.",
+        message: "Enquiry saved.",
         data,
       });
     } catch (error) {
       if (!error.status) console.error("Enquiry error:", error);
       return res.status(error.status || 500).json({
         success: false,
-        message: error.status ? error.message : "Couldn't send your enquiry. Please try again or call us.",
+        message: error.status ? error.message : "Couldn't save your enquiry.",
         ...(error.code ? { code: error.code } : {}),
         ...(error.extra || {}),
       });

@@ -16,7 +16,13 @@ const brandSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Cloudinary address of the brand's logo (npm run brands:logos)
     logo: {
+      type: String,
+      default: "",
+    },
+
+    logoPublicId: {
       type: String,
       default: "",
     },

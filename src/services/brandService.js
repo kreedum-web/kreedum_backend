@@ -23,7 +23,9 @@ class BrandService {
         return {
           ...brand,
           productCount,
-          // a product photo, for brand cards when there's no logo
+          // logo: Cloudinary logo (npm run brands:logos), '' when there's none.
+          // image: the logo, else a product photo (kept for older website versions)
+          logo: brand.logo || '',
           image: brand.logo || images.byBrand.get(brand.slug) || '',
         };
       })

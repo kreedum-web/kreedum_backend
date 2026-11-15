@@ -3,6 +3,7 @@ const router = express.Router();
 
 const enquiryController = require("../controllers/enquiryController");
 const rateLimit = require("../middleware/rateLimit");
+const optionalAuth = require("../middleware/optionalAuth");
 
 /**
  * @swagger
@@ -15,8 +16,8 @@ const rateLimit = require("../middleware/rateLimit");
  * @swagger
  * /api/v1/enquiries:
  *   post:
- *     summary: Send a bulk enquiry
- *     description: Saved in the database and emailed to ENQUIRY_EMAIL. The customer gets a confirmation email when they give an address.
+ *     summary: Save a bulk enquiry
+ *     description: Saved in the "enquiries" collection, with signedIn / user when the customer was signed in (send the usual Bearer token). The website then opens WhatsApp with the same details.
  *     tags: [Enquiries]
  *     requestBody:
  *       required: true
@@ -37,13 +38,14 @@ const rateLimit = require("../middleware/rateLimit");
  *               timeline: { type: string }
  *               message: { type: string }
  *     responses:
- *       201: { description: Enquiry received }
+ *       201: { description: Enquiry saved }
  *       400: { description: A field is missing or invalid }
  *       429: { description: Too many enquiries from this visitor }
  */
 router.post(
   "/",
-  rateLimit({ name: "enquiries", max: 5, minutes: 30, message: "You've sent a few enquiries already. Please call us or try again later." }),
+  rateLimit({ name: "enquiries", max: 10, minutes: 30, message: "You've sent a few enquiries already. Please call us or try again later." }),
+  optionalAuth,
   enquiryController.create
 );
 

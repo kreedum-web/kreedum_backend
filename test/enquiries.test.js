@@ -1,26 +1,26 @@
 // Run with: npm test
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const http = require("node:http");
+const jwt = require("jsonwebtoken");
 
-const { setTestTransport } = require("../src/utils/mailer");
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
+
 const Enquiry = require("../src/models/Enquiry");
+const User = require("../src/models/User");
 
 const saved = [];
 Enquiry.create = async (doc) => {
-  const row = { _id: `e${saved.length + 1}`, createdAt: new Date("2026-11-15T10:00:00Z"), ...doc };
+  const row = { _id: `e${saved.length + 1}`, createdAt: new Date(), ...doc };
   saved.push(row);
   return row;
 };
-Enquiry.updateOne = async (filter, update) => {
-  const row = saved.find((r) => r._id === filter._id);
-  if (row) Object.assign(row, update.$set);
-  return { matchedCount: row ? 1 : 0 };
-};
+const ACCOUNT = { _id: "64b000000000000000000001", email: "asha@gmail.com", phone: "" };
+User.findById = async (id) => (String(id) === ACCOUNT._id ? ACCOUNT : null);
 
-const mailbox = [];
-setTestTransport({ sendMail: async (message) => (mailbox.push(message), { messageId: "m" }) });
-
-const { submitEnquiry, cleanEnquiry, recipients } = require("../src/services/enquiryService");
+const { submitEnquiry, cleanEnquiry } = require("../src/services/enquiryService");
+const rateLimit = require("../src/middleware/rateLimit");
+const app = require("../src/app");
 
 const form = (extra = {}) => ({
   name: "Ravi Kumar",
@@ -32,47 +32,79 @@ const form = (extra = {}) => ({
   equipmentNeed: "Full gym setup",
   budget: "₹5 – 10 lakh",
   timeline: "1 – 3 months",
-  message: "Need a quote for 20 machines.\nDelivery to Gomti Nagar.",
+  message: "Need a quote for 20 machines.",
   ...extra,
 });
 
-test("enquiry: saved, emailed to the team (reply goes to the customer) and confirmed to the customer", async () => {
-  saved.length = 0;
-  mailbox.length = 0;
-  process.env.ENQUIRY_EMAIL = "sales@kreedum.test, owner@kreedum.test";
-  const result = await submitEnquiry(form(), { ip: "1.2.3.4" });
-  await new Promise((resolve) => setImmediate(resolve));
+function post(body, token) {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(0, () => {
+      const data = JSON.stringify(body);
+      const req = http.request(
+        {
+          port: server.address().port,
+          path: "/api/v1/enquiries",
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "content-length": Buffer.byteLength(data),
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+        },
+        (res) => {
+          let text = "";
+          res.on("data", (chunk) => (text += chunk));
+          res.on("end", () => {
+            server.close();
+            resolve({ status: res.statusCode, body: JSON.parse(text) });
+          });
+        }
+      );
+      req.on("error", (error) => (server.close(), reject(error)));
+      req.end(data);
+    });
+  });
+}
 
+test("enquiry from a visitor: saved with signedIn false", async () => {
+  saved.length = 0;
+  rateLimit.reset();
+  const res = await post(form());
+  assert.equal(res.status, 201);
+  assert.equal(res.body.data.signedIn, false);
   assert.equal(saved.length, 1);
+  assert.equal(saved[0].signedIn, false);
+  assert.equal(saved[0].user, null);
   assert.equal(saved[0].phone, "9876543210");
   assert.equal(saved[0].email, "ravi@school.in");
-  assert.equal(saved[0].ip, "1.2.3.4");
-  assert.equal(saved[0].emailSent, true);
-  assert.equal(result.emailSent, true);
-
-  const team = mailbox.find((m) => m.to === "sales@kreedum.test, owner@kreedum.test");
-  assert.ok(team, "team email");
-  assert.equal(team.replyTo, "ravi@school.in");
-  assert.match(team.subject, /Bulk enquiry: Ravi Kumar, Lucknow \(Full gym setup\)/);
-  assert.match(team.text, /Mobile: \+91 9876543210/);
-  assert.match(team.text, /City Montessori School/);
-  assert.match(team.html, /wa\.me\/919876543210/);
-  assert.match(team.html, /Need a quote for 20 machines\./);
-
-  const customer = mailbox.find((m) => m.to === "ravi@school.in");
-  assert.ok(customer, "confirmation email");
-  assert.match(customer.text, /Hi Ravi,/);
-  delete process.env.ENQUIRY_EMAIL;
 });
 
-test("enquiry: no email address → only the team email; default recipient", async () => {
+test("enquiry from a signed-in customer: saved with signedIn true and the account", async () => {
   saved.length = 0;
-  mailbox.length = 0;
-  await submitEnquiry(form({ email: "" }));
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(mailbox.length, 1);
-  assert.equal(mailbox[0].to, recipients({}));
-  assert.equal(mailbox[0].replyTo, undefined);
+  rateLimit.reset();
+  const token = jwt.sign({ id: ACCOUNT._id }, process.env.JWT_SECRET);
+  const res = await post(form(), token);
+  assert.equal(res.status, 201);
+  assert.equal(saved[0].signedIn, true);
+  assert.equal(String(saved[0].user), ACCOUNT._id);
+  assert.equal(saved[0].accountLogin, "asha@gmail.com");
+});
+
+test("an expired or wrong token doesn't block the enquiry", async () => {
+  saved.length = 0;
+  rateLimit.reset();
+  const res = await post(form(), "not-a-real-token");
+  assert.equal(res.status, 201);
+  assert.equal(saved[0].signedIn, false);
+});
+
+test("enquiry: a missing field → 400 with a message for that field", async () => {
+  saved.length = 0;
+  rateLimit.reset();
+  const res = await post(form({ phone: "12345" }));
+  assert.equal(res.status, 400);
+  assert.match(res.body.errors.phone, /10-digit/);
+  assert.equal(saved.length, 0);
 });
 
 test("enquiry: checks the fields", () => {
@@ -84,22 +116,17 @@ test("enquiry: checks the fields", () => {
       return e;
     }
   };
-  assert.equal(error(form({ phone: "12345" })).status, 400);
-  assert.match(error(form({ phone: "12345" })).message, /10-digit/);
   assert.ok(error(form({ name: "" })).extra.errors.name);
   assert.ok(error(form({ city: " " })).extra.errors.city);
   assert.ok(error(form({ email: "not-an-email" })).extra.errors.email);
   assert.ok(error(form({ equipmentNeed: "" })).extra.errors.equipmentNeed);
-  // unknown choice → "Other" (the email stays tidy)
   assert.equal(cleanEnquiry(form({ budget: "<script>" })).budget, "Other");
   assert.equal(cleanEnquiry(form({ phone: "09876543210" })).phone, "9876543210");
 });
 
 test("enquiry: bots that fill the hidden field are ignored", async () => {
   saved.length = 0;
-  mailbox.length = 0;
   const result = await submitEnquiry(form({ website: "http://spam.example" }));
   assert.equal(result.id, null);
   assert.equal(saved.length, 0);
-  assert.equal(mailbox.length, 0);
 });

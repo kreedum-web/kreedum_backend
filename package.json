@@ -19,7 +19,8 @@
     "images:folders": "node src/migration/organizeImageFolders.js",
     "gmail:token": "node src/scripts/gmailToken.js",
     "brands:apply": "node src/migration/applyBrandRules.js",
-    "db:copy-catalog": "node src/scripts/copyCatalog.js"
+    "db:copy-catalog": "node src/scripts/copyCatalog.js",
+    "brands:logos": "node src/migration/brandLogos.js"
   },
   "keywords": [],
   "author": "",
