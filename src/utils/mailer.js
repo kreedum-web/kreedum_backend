@@ -133,17 +133,17 @@ async function sendWithResend(message) {
 // ---------------------------------------------------------------- public
 
 /**
- * @param {{ to: string, subject: string, html: string, text: string }} email
+ * @param {{ to: string, subject: string, html: string, text: string, replyTo?: string }} email
  * @returns {Promise<{ sent: boolean, via: string, messageId?: string }>}
  */
-async function sendMail({ to, subject, html, text }) {
+async function sendMail({ to, subject, html, text, replyTo }) {
   const message = {
     from: fromAddress(),
     to,
     subject,
     html,
     text,
-    ...(process.env.MAIL_REPLY_TO ? { replyTo: process.env.MAIL_REPLY_TO } : {}),
+    ...(replyTo || process.env.MAIL_REPLY_TO ? { replyTo: replyTo || process.env.MAIL_REPLY_TO } : {}),
   };
 
   if (testTransport) {

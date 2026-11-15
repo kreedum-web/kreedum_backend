@@ -220,4 +220,77 @@ ${orderUrl ? `<p style="margin:20px 0 0;"><a href="${escape(orderUrl)}" style="d
   };
 }
 
-module.exports = { orderCancelledEmail, loginCodeEmail, verificationCodeEmail, passwordResetCodeEmail, orderConfirmationEmail, escape };
+const IST = (date) =>
+  new Date(date || Date.now()).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
+
+/** To the team: a new bulk enquiry from the website. Reply goes to the customer when they gave an email. */
+function bulkEnquiryEmail({ enquiry }) {
+  const rows = [
+    ["Name", enquiry.name],
+    ["Mobile", `+91 ${enquiry.phone}`],
+    ["Email", enquiry.email],
+    ["City", enquiry.city],
+    ["Organisation", enquiry.organisation],
+    ["Facility type", enquiry.facilityType],
+    ["Needs", enquiry.equipmentNeed],
+    ["Budget", enquiry.budget],
+    ["Timeline", enquiry.timeline],
+    ["Sent from", enquiry.page],
+    ["Received", IST(enquiry.createdAt)],
+  ].filter(([, value]) => value);
+  const call = `tel:+91${enquiry.phone}`;
+  const whatsapp = `https://wa.me/91${enquiry.phone}`;
+
+  return {
+    subject: `Bulk enquiry: ${enquiry.name}, ${enquiry.city}${enquiry.equipmentNeed ? ` (${enquiry.equipmentNeed.split(" (")[0]})` : ""}`,
+    html: layout({
+      preheader: `New bulk enquiry from ${enquiry.name}, ${enquiry.city}`,
+      body: `<p style="margin:0 0 6px;font-size:18px;font-weight:bold;">New bulk enquiry</p>
+<p style="margin:0 0 16px;color:${MUTED};">From the website's “Bulk enquiry” form.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+${rows
+  .map(
+    ([label, value]) => `<tr><td style="padding:7px 12px 7px 0;border-bottom:1px solid #EEF1F7;color:${MUTED};white-space:nowrap;vertical-align:top;">${escape(label)}</td><td style="padding:7px 0;border-bottom:1px solid #EEF1F7;font-weight:bold;">${escape(value)}</td></tr>`
+  )
+  .join("")}
+</table>
+${enquiry.message ? `<p style="margin:18px 0 6px;color:${MUTED};">Message</p><div style="padding:12px 14px;border-radius:10px;background:#F6F8FC;white-space:pre-wrap;">${escape(enquiry.message)}</div>` : ""}
+<p style="margin:22px 0 0;">
+<a href="${escape(call)}" style="display:inline-block;margin:0 8px 8px 0;padding:11px 18px;border-radius:10px;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;">Call</a>
+<a href="${escape(whatsapp)}" style="display:inline-block;margin:0 8px 8px 0;padding:11px 18px;border-radius:10px;background:#25D366;color:#08331C;text-decoration:none;font-weight:bold;">WhatsApp</a>
+</p>
+${enquiry.email ? `<p style="margin:6px 0 0;color:${MUTED};font-size:13px;">Replying to this email goes straight to ${escape(enquiry.email)}.</p>` : ""}`,
+    }),
+    text: [
+      "New bulk enquiry from the website",
+      "",
+      ...rows.map(([label, value]) => `${label}: ${value}`),
+      ...(enquiry.message ? ["", "Message:", enquiry.message] : []),
+      "",
+      `Call: +91 ${enquiry.phone}`,
+      `WhatsApp: ${whatsapp}`,
+    ].join("\n"),
+  };
+}
+
+/** To the customer: we've received your enquiry. */
+function enquiryReceivedEmail({ name }) {
+  return {
+    subject: "We've received your enquiry — Kreedum Sports",
+    html: layout({
+      preheader: "Our team will call you shortly with a quote.",
+      body: `<p style="margin:0 0 8px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
+<p style="margin:0 0 12px;">Thank you for your bulk enquiry. Our team will call you within one working day with prices and options.</p>
+<p style="margin:0;color:${MUTED};">Need it sooner? Call or WhatsApp us on <a href="tel:+917570002458" style="color:${BLUE};">+91 75700 02458</a>.</p>`,
+    }),
+    text: [
+      `${name ? `Hi ${name},` : "Hi,"}`,
+      "",
+      "Thank you for your bulk enquiry. Our team will call you within one working day with prices and options.",
+      "",
+      "Need it sooner? Call or WhatsApp us on +91 75700 02458.",
+    ].join("\n"),
+  };
+}
+
+module.exports = { bulkEnquiryEmail, enquiryReceivedEmail, orderCancelledEmail, loginCodeEmail, verificationCodeEmail, passwordResetCodeEmail, orderConfirmationEmail, escape };
