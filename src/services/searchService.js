@@ -155,7 +155,7 @@ const currentSort =
   async getPopularSearches() {
     return [
       'Aerofit Treadmill',
-      'Home Gym',
+      'Multi Gym',
       'Exercise Bike',
       'Commercial Treadmill',
       'Smith Machine',

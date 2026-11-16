@@ -37,6 +37,12 @@ const categorySchema = new mongoose.Schema(
       default: [],
     },
 
+    // "category-rule": added by src/config/categoryRules.js, not from Metro's menu
+    addedBy: {
+      type: String,
+      default: "",
+    },
+
     productCount: {
       type: Number,
       default: 0,

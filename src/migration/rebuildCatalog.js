@@ -2,7 +2,7 @@
  * Rebuild the website catalogue (KreedumCommerce) from the scraped
  * Metro Sports data (kreedum_supplier_sync), in one go:
  *
- *   1. categories  — Metro's menu tree, exactly as on metrosports.co.in
+ *   1. categories  — Metro's menu tree, plus our own tweaks (src/config/categoryRules.js)
  *   2. products    — department / parentCategory / childCategory from that same tree
  *   3. brands      — from the products, with real product counts
  *
@@ -20,8 +20,8 @@
  *     enquiryCount, popularityScore, stockStatus, availabilityMessage
  *   - brand logo / description / featured are kept
  *   - products that disappeared from Metro are hidden, never deleted
- *   - categories that are not in Metro's menu ARE deleted (they are generated
- *     data); the dry run lists them first
+ *   - categories that are not in Metro's menu (or added by categoryRules.js)
+ *     ARE deleted (they are generated data); the dry run lists them first
  *
  * Needs the scraper's category tree: run `npm run categories` in the scraper first.
  */
@@ -45,6 +45,7 @@ const { variantsFromSupplier } = require("../utils/productVariants");
 const { productImageUrls, isOwnImage, withOwnImages } = require("../utils/productImages");
 const ImageAsset = require("../models/ImageAsset");
 const { isHiddenBrand, applyRenameToSupplierProduct } = require("../utils/brandRules");
+const { withCategoryRules, movedCategoryPath } = require("../utils/categoryRules");
 
 const SUPPLIER = "metrosports";
 const DEFAULT_AVAILABILITY = "Contact Kreedum Sports for product availability.";
@@ -78,6 +79,7 @@ function buildCategoryDocs(supplierCategories) {
       path: node.path,
       displayOrder: node.displayOrder || 0,
       supplierCategories: [node.sourceSlug || node.slug],
+      addedBy: "",
       isActive: true,
     }));
 }
@@ -103,7 +105,11 @@ function uniqueSlug(base, url, used) {
 function buildProduct(original, tree, existing, usedSlugs, issues) {
   const leaf = leafSlug(original.categorySlug);
   const node = tree.get(leaf);
-  const categoryPath = node?.path?.length ? node.path : original.categoryPath || [];
+  let categoryPath = node?.path?.length ? node.path : original.categoryPath || [];
+
+  // src/config/categoryRules.js: e.g. boxing gloves into their own sub-category.
+  const moved = node ? movedCategoryPath({ name: original.name, categoryPath }, tree) : null;
+  if (moved) categoryPath = moved;
 
   // src/config/brandRules.js: products we sell under our own name.
   const sp = applyRenameToSupplierProduct(original, categoryPath);
@@ -131,7 +137,7 @@ function buildProduct(original, tree, existing, usedSlugs, issues) {
   const categoryWords = categoryPath.map((slug) => tree.get(slug)?.name).filter(Boolean);
   const searchKeywords = [
     ...new Set([
-      ...generateKeywords({ name, brand, sku, categorySlug: leaf }),
+      ...generateKeywords({ name, brand, sku, categorySlug: categoryPath.at(-1) || leaf }),
       ...categoryWords.map((w) => w.toLowerCase()),
     ]),
   ];
@@ -236,11 +242,13 @@ function planRebuild({
 }) {
   const issues = [];
 
-  // ---------- categories
-  const categories = buildCategoryDocs(supplierCategories);
-  if (!categories.length) {
+  // ---------- categories (Metro's menu + src/config/categoryRules.js)
+  const metroCategories = buildCategoryDocs(supplierCategories);
+  if (!metroCategories.length) {
     throw new Error("No category tree in kreedum_supplier_sync. Run `npm run categories` in the scraper first.");
   }
+  const { categories, problems } = withCategoryRules(metroCategories);
+  problems.forEach((message) => issues.push({ code: "category_rule_problem", message }));
   const tree = new Map(categories.map((c) => [c.slug, c]));
   const staleCategories = existingCategories.filter((c) => !tree.has(c.slug)).map((c) => c.slug);
 
