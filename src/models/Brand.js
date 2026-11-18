@@ -48,6 +48,13 @@ const brandSchema = new mongoose.Schema(
       default: false,
     },
 
+    // Switched off in the admin dashboard: the brand and all its products are
+    // kept off the website, and the catalogue rebuild keeps them off.
+    adminHidden: {
+      type: Boolean,
+      default: false,
+    },
+
     isActive: {
       type: Boolean,
       default: true,

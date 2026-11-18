@@ -301,6 +301,14 @@ const productSchema = new mongoose.Schema(
       default: "",
     },
 
+    // Fields changed by hand in the admin dashboard (e.g. "sellingPrice",
+    // "isActive"). The catalogue rebuild leaves these alone, so an admin's
+    // price or on/off choice isn't undone by the next Metro sync.
+    adminLocked: {
+      type: [String],
+      default: [],
+    },
+
     // =====================================================
     // MARKETING FLAGS
     // =====================================================

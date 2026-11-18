@@ -246,6 +246,14 @@ const orderSchema = new mongoose.Schema(
       default: "",
     },
 
+    // When someone in the admin dashboard first opened this order. Empty =
+    // a new order the dashboard still shows as "new".
+    adminSeenAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
     // Online payment through Cashfree (paymentMethod ONLINE).
     payment: {
       gateway: { type: String, default: "" },          // "cashfree"

@@ -22,6 +22,8 @@ const savedAddressRoutes = require("./routes/savedAddressRoutes");
 const profileRoutes = require("./routes/profileRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const enquiryRoutes = require("./routes/enquiryRoutes");
+const adminRoutes = require("./routes/adminRoutes");
+const trackRoutes = require("./routes/trackRoutes");
 
 const app = express();
 
@@ -113,6 +115,8 @@ app.use("/api/v1/addresses", savedAddressRoutes)
 app.use("/api/v1/profile", profileRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/enquiries", enquiryRoutes);
+app.use("/api/v1/track", trackRoutes);
+app.use("/api/v1/admin", adminRoutes);
 
 // ===============================
 // 404 Handler

@@ -230,6 +230,23 @@ function buildProduct(original, tree, existing, usedSlugs, issues) {
 }
 
 /**
+ * What the admin dashboard changed wins over Metro's data:
+ *   - a brand switched off there keeps all its products hidden
+ *   - fields edited by hand (product.adminLocked: price, name, photos,
+ *     on/off …) keep their current value
+ */
+function keepAdminChoices(update, existing, adminHiddenBrands = new Set()) {
+  const $set = update.$set;
+  if (adminHiddenBrands.has($set.brandSlug)) {
+    Object.assign($set, { isActive: false, visibility: "hidden", hiddenBy: "admin-brand" });
+  }
+  for (const field of existing?.adminLocked || []) {
+    if (existing[field] !== undefined) $set[field] = existing[field];
+  }
+  return update;
+}
+
+/**
  * Work out every change without touching the database.
  */
 function planRebuild({
@@ -241,6 +258,8 @@ function planRebuild({
   imageMap = new Map(), // supplier photo -> our Cloudinary copy (npm run images:upload)
 }) {
   const issues = [];
+  // Brands switched off in the admin dashboard stay off.
+  const adminHiddenBrands = new Set(existingBrands.filter((b) => b.adminHidden).map((b) => b.slug));
 
   // ---------- categories (Metro's menu + src/config/categoryRules.js)
   const metroCategories = buildCategoryDocs(supplierCategories);
@@ -268,7 +287,8 @@ function planRebuild({
       const existing = findExisting(sp);
       // Photos already copied to our Cloudinary are used instead of the supplier's.
       const withImages = withOwnImages(sp, imageMap);
-      return { sp, existing, update: buildProduct(withImages, tree, existing, usedSlugs, issues) };
+      const update = buildProduct(withImages, tree, existing, usedSlugs, issues);
+      return { sp, existing, update: keepAdminChoices(update, existing, adminHiddenBrands) };
     });
 
   const removed = existingProducts.filter(
@@ -450,9 +470,13 @@ async function main() {
   const supplierProducts = await supplier.collection("products").find({ supplier: SUPPLIER }).toArray();
 
   const [existingProducts, existingCategories, existingBrands, imageAssets] = await Promise.all([
-    Product.find({}, { sourceUrl: 1, slug: 1, visibility: 1, isActive: 1 }).lean(),
+    // adminLocked + the fields it can lock: hand edits from the admin dashboard are kept.
+    Product.find({}, {
+      sourceUrl: 1, slug: 1, visibility: 1, isActive: 1, adminLocked: 1, name: 1, mrp: 1, sellingPrice: 1,
+      discountPercent: 1, maxPrice: 1, variants: 1, hiddenBy: 1, images: 1, thumbnail: 1,
+    }).lean(),
     Category.find({}, { slug: 1 }).lean(),
-    Brand.find({}, { slug: 1 }).lean(),
+    Brand.find({}, { slug: 1, adminHidden: 1 }).lean(),
     ImageAsset.find({}, { sourceUrl: 1, url: 1 }).lean(),
   ]);
   const imageMap = new Map(imageAssets.map((asset) => [asset.sourceUrl, asset.url]));
@@ -495,4 +519,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { planRebuild, buildCategoryDocs };
+module.exports = { planRebuild, buildCategoryDocs, keepAdminChoices };
