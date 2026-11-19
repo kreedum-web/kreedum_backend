@@ -11,6 +11,7 @@
  *   4. Not paid within PAYMENT_WINDOW_MINUTES → the order cancels itself.
  *   5. A paid order cancelled by the customer is refunded automatically.
  */
+const notifications = require("./notificationService");
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Cart = require("../models/Cart");
@@ -174,6 +175,7 @@ async function markPaid(order, payment) {
   // First time only: the order is real now.
   await Cart.deleteMany({ user: updated.user });
   fillProfileFromAddress(updated.user, updated.shippingAddress).then(() => sendOrderConfirmation(updated, updated.user));
+  notifications.newOrder(updated);
   return updated;
 }
 

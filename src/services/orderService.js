@@ -1,3 +1,4 @@
+const notifications = require("./notificationService");
 const mongoose = require("mongoose");
 
 const Cart = require("../models/Cart");
@@ -166,6 +167,8 @@ class OrderService {
       // address, then email the order confirmation. Online orders get both
       // once the payment succeeds.
       if (!online) fillProfileFromAddress(userId, payload.shippingAddress).then(() => sendOrderConfirmation(order[0], userId));
+      // Admin dashboard alert (online orders: once paid, see paymentService).
+      if (!online) notifications.newOrder(order[0]);
 
       return order[0];
 
@@ -253,6 +256,8 @@ class OrderService {
 
     // Cancellation email, in the background (never affects the cancellation).
     sendOrderCancelled(order, userId);
+    // Admin dashboard alert. An unpaid online checkout isn't a real order yet.
+    if (order.statusHistory.some((h) => h.status === "PENDING")) notifications.orderCancelledByCustomer(order);
 
     return order;
   }

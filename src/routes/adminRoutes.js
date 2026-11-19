@@ -6,6 +6,8 @@ const orders = require("../services/admin/adminOrderService");
 const products = require("../services/admin/adminProductService");
 const content = require("../services/admin/adminContentService");
 const stats = require("../services/admin/adminStatsService");
+const notifications = require("../services/admin/adminNotificationService");
+const carts = require("../services/admin/adminCartService");
 
 /**
  * Admin dashboard API (admin.kreedum.com). Every route needs a signed-in
@@ -55,6 +57,33 @@ router.get("/me", handle((req) => ({
  */
 router.get("/overview", handle(() => stats.overview()));
 router.get("/traffic", handle((req) => stats.traffic(req.query)));
+
+// ---------------------------------------------------------------- notifications
+/**
+ * @swagger
+ * /api/v1/admin/notifications:
+ *   get: { summary: "Newest 20 alerts (last 2 days), unread count, orders not opened yet", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   delete: { summary: "Clear all alerts", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/notifications/read:
+ *   post: { summary: "Mark as read: { id } for one, nothing for all", tags: [Admin], security: [{ bearerAuth: [] }] }
+ */
+router.get("/notifications", handle(() => notifications.list()));
+router.post("/notifications/read", handle((req) => notifications.markRead(req.body?.id)));
+router.delete("/notifications", handle(() => notifications.clear()));
+
+// ---------------------------------------------------------------- carts & wishlists
+/**
+ * @swagger
+ * /api/v1/admin/carts:
+ *   get: { summary: "Customers with items in cart (?type=cart) or wishlist (?type=wishlist); ?q=&idle=24&page=", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/carts/{userId}:
+ *   get: { summary: "One customer's cart, wishlist, recent orders and follow-up notes", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/carts/{userId}/follow-ups:
+ *   post: { summary: "Add a follow-up note: { note, about: cart|wishlist|general, channel: call|whatsapp|email|other }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ */
+router.get("/carts", handle((req) => carts.list(req.query)));
+router.get("/carts/:userId", handle((req) => carts.detail(req.params.userId)));
+router.post("/carts/:userId/follow-ups", handle((req) => carts.addFollowUp(req.params.userId, req.body, req.user)));
 
 // ---------------------------------------------------------------- orders
 /**
@@ -128,7 +157,7 @@ router.delete("/content/:kind/:id", handle((req) => content.remove(req.params.ki
  *   get: { summary: "One customer and their orders", tags: [Admin], security: [{ bearerAuth: [] }] }
  *   patch: { summary: "{ isActive } — disable / re-enable the account", tags: [Admin], security: [{ bearerAuth: [] }] }
  * /api/v1/admin/enquiries:
- *   get: { summary: "Bulk enquiries (?status=NEW|CONTACTED|CLOSED&page=)", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   get: { summary: "Enquiries (?kind=bulk|contact|product|whatsapp&status=NEW|CONTACTED|CLOSED&page=)", tags: [Admin], security: [{ bearerAuth: [] }] }
  * /api/v1/admin/enquiries/{id}:
  *   patch: { summary: "{ status }", tags: [Admin], security: [{ bearerAuth: [] }] }
  */

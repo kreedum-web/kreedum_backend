@@ -5,6 +5,7 @@ const User = require("../../models/User");
 const Enquiry = require("../../models/Enquiry");
 const Product = require("../../models/Product");
 const PageView = require("../../models/PageView");
+const Cart = require("../../models/Cart");
 const HttpError = require("../../utils/httpError");
 const { indiaDay, indiaDayStart } = require("../trackingService");
 
@@ -57,6 +58,12 @@ class AdminStatsService {
       PageView.distinct("visitorId", { at: { $gte: liveSince } }).then((ids) => ids.length),
       Product.countDocuments({ isActive: true, visibility: "published", stockStatus: "out_of_stock" }),
     ]);
+    // Customers with items waiting in their cart for over a day.
+    const openCarts = (await Cart.aggregate([
+      { $group: { _id: "$user", updatedAt: { $max: "$updatedAt" } } },
+      { $match: { updatedAt: { $lt: new Date(now.getTime() - 24 * 60 * 60 * 1000) } } },
+      { $count: "n" },
+    ]))[0]?.n || 0;
 
     const statuses = Object.fromEntries(statusCounts.map((s) => [s._id, s.count]));
     return {
@@ -79,6 +86,7 @@ class AdminStatsService {
         inTransit: (statuses.SHIPPED || 0) + (statuses.OUT_FOR_DELIVERY || 0),
         newEnquiries,
         outOfStock,
+        openCarts,
       },
       statuses,
       liveVisitors,
@@ -217,21 +225,26 @@ class AdminStatsService {
 
   // ------------------------------------------------------------ enquiries
 
-  async enquiries({ status = "", page = 1, limit = 25 } = {}) {
-    const filter = status ? { status } : {};
+  /** kind: bulk | contact | product | whatsapp ("" = all). counts: per status within the kind; newByKind: NEW per kind. */
+  async enquiries({ status = "", kind = "", page = 1, limit = 25 } = {}) {
+    const filter = {};
+    if (status) filter.status = status;
+    if (kind) filter.kind = kind === "bulk" ? { $in: ["bulk", null] } : kind;
     const size = Math.min(Math.max(Number(limit) || 25, 1), 100);
     const current = Math.max(Number(page) || 1, 1);
     const [rows, total, counts] = await Promise.all([
       Enquiry.find(filter).sort({ createdAt: -1 }).skip((current - 1) * size).limit(size).lean(),
       Enquiry.countDocuments(filter),
-      Enquiry.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+      Enquiry.aggregate([{ $match: kind ? { kind: filter.kind } : {} }, { $group: { _id: "$status", count: { $sum: 1 } } }]),
     ]);
+    const newByKind = await Enquiry.aggregate([{ $match: { status: "NEW" } }, { $group: { _id: { $ifNull: ["$kind", "bulk"] }, count: { $sum: 1 } } }]);
     return {
       enquiries: rows.map((e) => ({ ...e, id: String(e._id) })),
       page: current,
       pages: Math.max(Math.ceil(total / size), 1),
       total,
       counts: Object.fromEntries(counts.map((c) => [c._id, c.count])),
+      newByKind: Object.fromEntries(newByKind.map((c) => [c._id, c.count])),
     };
   }
 
