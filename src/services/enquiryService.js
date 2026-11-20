@@ -63,7 +63,6 @@ function cleanEnquiry(body = {}) {
   for (const field of ["facilityType", "equipmentNeed", "budget", "timeline"]) {
     if (data[field] && !OPTIONS[field].includes(data[field])) data[field] = "Other";
   }
-  if (!data.equipmentNeed) errors.equipmentNeed = "Please choose what you need.";
 
   if (Object.keys(errors).length) {
     throw new HttpError(400, Object.values(errors)[0], "INVALID_ENQUIRY", { errors });

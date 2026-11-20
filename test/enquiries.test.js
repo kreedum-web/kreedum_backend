@@ -119,7 +119,8 @@ test("enquiry: checks the fields", () => {
   assert.ok(error(form({ name: "" })).extra.errors.name);
   assert.ok(error(form({ city: " " })).extra.errors.city);
   assert.ok(error(form({ email: "not-an-email" })).extra.errors.email);
-  assert.ok(error(form({ equipmentNeed: "" })).extra.errors.equipmentNeed);
+  // The short popup only asks name, phone, city and type of space.
+  assert.equal(error(form({ equipmentNeed: "", facilityType: "", email: "" })), null);
   assert.equal(cleanEnquiry(form({ budget: "<script>" })).budget, "Other");
   assert.equal(cleanEnquiry(form({ phone: "09876543210" })).phone, "9876543210");
 });
