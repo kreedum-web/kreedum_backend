@@ -22,7 +22,9 @@ function withCategoryRules(categories, rules = RULES) {
   const nextOrder = new Map();
   const orderUnder = (parentSlug) => {
     if (!nextOrder.has(parentSlug)) {
-      const metro = result.filter((c) => c.parentSlug === parentSlug).map((c) => c.displayOrder || 0);
+      const metro = result
+        .filter((c) => (parentSlug === null ? c.level === 1 : c.parentSlug === parentSlug))
+        .map((c) => c.displayOrder || 0);
       nextOrder.set(parentSlug, Math.max(0, ...metro) + 1);
     }
     const order = nextOrder.get(parentSlug);
@@ -32,6 +34,23 @@ function withCategoryRules(categories, rules = RULES) {
 
   for (const rule of rules.newCategories) {
     if (bySlug.has(rule.slug)) continue; // Metro has it now: keep theirs
+    // parent: null -> a new top-level department (e.g. "Shoes"), after Metro's.
+    if (rule.parent === null) {
+      const doc = {
+        name: rule.name,
+        slug: rule.slug,
+        level: 1,
+        rootSlug: rule.slug,
+        path: [rule.slug],
+        displayOrder: orderUnder(null),
+        supplierCategories: [],
+        isActive: true,
+        addedBy: "category-rule",
+      };
+      result.push(doc);
+      bySlug.set(doc.slug, doc);
+      continue;
+    }
     const parent = bySlug.get(rule.parent);
     if (!parent) {
       problems.push(`newCategories: "${rule.slug}" — no parent category "${rule.parent}"`);

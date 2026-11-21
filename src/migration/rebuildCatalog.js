@@ -1,6 +1,10 @@
 /**
  * Rebuild the website catalogue (KreedumCommerce) from the scraped
- * Metro Sports data (kreedum_supplier_sync), in one go:
+ * supplier data (kreedum_supplier_sync), in one go:
+ *
+ *   products       Metro Sports (collection `products`)
+ *   catalog_feed   Aerofit and Cockatoo products to sell, built by the scraper
+ *                  (`npm run publish:build`), in the same shape as Metro's
  *
  *   1. categories  — Metro's menu tree, plus our own tweaks (src/config/categoryRules.js)
  *   2. products    — department / parentCategory / childCategory from that same tree
@@ -19,7 +23,9 @@
  *     isBestSeller, isNewArrival, isTrending, badge, displayOrder, viewCount,
  *     enquiryCount, popularityScore, stockStatus, availabilityMessage
  *   - brand logo / description / featured are kept
- *   - products that disappeared from Metro are hidden, never deleted
+ *   - products that disappeared from their supplier's feed are hidden, never
+ *     deleted; a supplier with no products in this run (e.g. catalog_feed not
+ *     built yet) is left alone, its products are not hidden
  *   - categories that are not in Metro's menu (or added by categoryRules.js)
  *     ARE deleted (they are generated data); the dry run lists them first
  *
@@ -47,7 +53,9 @@ const ImageAsset = require("../models/ImageAsset");
 const { isHiddenBrand, applyRenameToSupplierProduct } = require("../utils/brandRules");
 const { withCategoryRules, movedCategoryPath } = require("../utils/categoryRules");
 
-const SUPPLIER = "metrosports";
+const SUPPLIER = "metrosports"; // Metro's products; catalog_feed products carry their own `supplier`
+const FEED_COLLECTION = "catalog_feed";
+const supplierOf = (p) => p.supplier || SUPPLIER;
 const DEFAULT_AVAILABILITY = "Contact Kreedum Sports for product availability.";
 
 // ===================================================================
@@ -160,7 +168,7 @@ function buildProduct(original, tree, existing, usedSlugs, issues) {
 
   return {
     $set: {
-      supplier: SUPPLIER,
+      supplier: supplierOf(sp),
       supplierProductId: String(sp._id || ""),
       sourceUrl: sp.url,
       lastSyncedAt: sp.lastScrapedAt || new Date(),
@@ -281,18 +289,29 @@ function planRebuild({
   // Slugs held by products that stay as they are (not from this supplier feed).
   const usedSlugs = new Set(existingProducts.filter((p) => !supplierUrls.has(p.sourceUrl)).map((p) => p.slug));
 
-  const products = [...supplierProducts]
-    .sort((a, b) => a.url.localeCompare(b.url))
-    .map((sp) => {
-      const existing = findExisting(sp);
+  // Products already on the website go first, so they keep their web address
+  // (slug) when a new product has the same name; then Metro before the
+  // catalog_feed suppliers; then by link, so every run gives the same result.
+  const rank = (x) => (x.existing ? 0 : 2) + (supplierOf(x.sp) === SUPPLIER ? 0 : 1);
+  const products = supplierProducts
+    .map((sp) => ({ sp, existing: findExisting(sp) }))
+    .sort((a, b) => rank(a) - rank(b) || a.sp.url.localeCompare(b.sp.url))
+    .map(({ sp, existing }) => {
       // Photos already copied to our Cloudinary are used instead of the supplier's.
       const withImages = withOwnImages(sp, imageMap);
       const update = buildProduct(withImages, tree, existing, usedSlugs, issues);
       return { sp, existing, update: keepAdminChoices(update, existing, adminHiddenBrands) };
     });
 
+  // Hide products gone from their supplier's feed, but only for suppliers that
+  // are in this run: an empty feed never hides a whole supplier.
+  const suppliersInRun = new Set(supplierProducts.map(supplierOf));
   const removed = existingProducts.filter(
-    (p) => p.sourceUrl && !supplierUrls.has(p.sourceUrl) && (p.isActive || p.visibility === "published")
+    (p) =>
+      p.sourceUrl &&
+      suppliersInRun.has(supplierOf(p)) &&
+      !supplierUrls.has(p.sourceUrl) &&
+      (p.isActive || p.visibility === "published")
   );
 
   // ---------- counts (what the website will show)
@@ -333,7 +352,11 @@ function planRebuild({
       newProducts: products.filter((p) => !p.existing).length,
       visibleProducts: visible.length,
       hiddenProducts: products.length - visible.length,
-      productsRemovedFromMetro: removed.length,
+      productsRemovedFromMetro: removed.length, // gone from their supplier's feed (name kept for the dashboard)
+      productsBySupplier: [...suppliersInRun].reduce(
+        (acc, s) => ({ ...acc, [s]: products.filter((p) => supplierOf(p.sp) === s).length }),
+        {}
+      ),
       slugChanges: products.filter((p) => p.existing && p.existing.slug !== p.update.$set.slug).length,
       brands: brandCounts.size,
       staleBrands,
@@ -402,7 +425,7 @@ async function applyPlan(plan) {
       { $set: { isActive: false, visibility: "hidden" } }
     );
   }
-  console.log(`✅ Products: ${upserted} new, ${modified} updated, ${plan.removed.length} hidden (gone from Metro)`);
+  console.log(`✅ Products: ${upserted} new, ${modified} updated, ${plan.removed.length} hidden (gone from their supplier)`);
   if (errors.length) {
     console.log(`❌ ${errors.length} product writes failed, first ones:`);
     errors.slice(0, 5).forEach((e) => console.log("   ", e));
@@ -467,12 +490,20 @@ async function main() {
   const supplier = await connectSupplierDatabase();
 
   const supplierCategories = await supplier.collection("categories").find({ supplier: SUPPLIER, isActive: true }).toArray();
-  const supplierProducts = await supplier.collection("products").find({ supplier: SUPPLIER }).toArray();
+  const metroProducts = await supplier.collection("products").find({ supplier: SUPPLIER }).toArray();
+  // Aerofit / Cockatoo products to sell (scraper: npm run publish:build). Missing collection = none.
+  const feedProducts = await supplier.collection(FEED_COLLECTION).find({ status: "active" }).toArray();
+  const supplierProducts = [...metroProducts, ...feedProducts];
+  console.log(
+    `📦 ${metroProducts.length} Metro products + ${feedProducts.length} from ${FEED_COLLECTION} (${[
+      ...new Set(feedProducts.map(supplierOf)),
+    ].join(", ") || "none"})`
+  );
 
   const [existingProducts, existingCategories, existingBrands, imageAssets] = await Promise.all([
     // adminLocked + the fields it can lock: hand edits from the admin dashboard are kept.
     Product.find({}, {
-      sourceUrl: 1, slug: 1, visibility: 1, isActive: 1, adminLocked: 1, name: 1, mrp: 1, sellingPrice: 1,
+      sourceUrl: 1, supplier: 1, slug: 1, visibility: 1, isActive: 1, adminLocked: 1, name: 1, mrp: 1, sellingPrice: 1,
       discountPercent: 1, maxPrice: 1, variants: 1, hiddenBy: 1, images: 1, thumbnail: 1,
     }).lean(),
     Category.find({}, { slug: 1 }).lean(),

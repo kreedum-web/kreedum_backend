@@ -13,8 +13,8 @@ module.exports = {
   // Show a category under a different name (its web address stays the same).
   renamedCategories: [{ slug: "home-gym", name: "Multi Gym" }],
 
-  // Categories Metro doesn't have. "parent" is an existing category's slug.
-  // Order = order in the menu.
+  // Categories Metro doesn't have. "parent" is an existing category's slug,
+  // or null for a new top-level department. Order = order in the menu.
   newCategories: [
     { slug: "punching-bags", name: "Punching Bags", parent: "boxing-and-punching-bags" },
     { slug: "boxing-mma-gloves", name: "Boxing & MMA Gloves", parent: "boxing-and-punching-bags" },
@@ -22,6 +22,12 @@ module.exports = {
     { slug: "speed-balls", name: "Speed Balls", parent: "boxing-and-punching-bags" },
     { slug: "grappling-dummies", name: "Grappling Dummies", parent: "boxing-and-punching-bags" },
     { slug: "gym-gloves", name: "Gym Gloves", parent: "accessories" },
+    // For Aerofit / Cockatoo products (scraper catalog_feed), decided 21 Nov 2026.
+    { slug: "swimming", name: "Swimming", parent: "sports" },
+    { slug: "badminton", name: "Badminton", parent: "sports" },
+    { slug: "cricket", name: "Cricket", parent: "sports" },
+    { slug: "other-sports", name: "Other Sports", parent: "sports" },
+    { slug: "shoes", name: "Shoes", parent: null },
   ],
 
   // Move products by words in their name. Only products currently anywhere

@@ -659,3 +659,12 @@ This repository is maintained for the Kreedum Sports platform.
 ---
 
 **Kreedum Sports — Powering Sports & Fitness Ecommerce.**
+
+## Aerofit and Cockatoo products (catalog_feed)
+
+`npm run rebuild:catalog` also reads `catalog_feed` in kreedum_supplier_sync: Aerofit and Cockatoo products built by the scraper (`npm run publish:build` in ms-scrapper-V2), in the same shape as Metro's products. Each website product keeps its supplier (`metrosports`, `aerofit`, `cockatoo`).
+
+- A product that leaves its supplier's feed is hidden (never deleted). A supplier with no products in a run is left alone, so an empty or missing `catalog_feed` never hides all Aerofit / Cockatoo products.
+- Products already on the website keep their web address (slug) when a new product has the same name; Metro goes before the feed.
+- New categories for these products are in `src/config/categoryRules.js` (Swimming, Badminton, Cricket, Other Sports under Sports, and Shoes as a top-level department: `parent: null`).
+- No price from the supplier -> `stockStatus: "enquiry_only"`, like Metro's.
