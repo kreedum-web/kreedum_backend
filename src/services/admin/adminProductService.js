@@ -8,6 +8,7 @@ const { isHiddenBrand } = require("../../utils/brandRules");
 const { searchKeywordsFor } = require("../../utils/searchKeywords");
 const HttpError = require("../../utils/httpError");
 const { uploadImage } = require("../../utils/cloudinaryFolders");
+const extractSpecifications = require("../../utils/extractSpecifications");
 
 /**
  * Products and brands in the admin dashboard.
@@ -20,7 +21,14 @@ const { uploadImage } = require("../../utils/cloudinaryFolders");
  *
  * Brand and category can be changed too (also locked): the rebuild then
  * builds the product with the admin's brand and category.
+ *
+ * Products can also be added by hand (supplier "manual"). No supplier feed
+ * has them, so the catalogue rebuild never changes or hides them, and their
+ * description, features and SKU can be edited here too.
  */
+
+const MANUAL = "manual";
+const isManual = (p) => p.supplier === MANUAL;
 
 // Fields the admin may change, and the cleaner for each.
 const EDITABLE = {
@@ -47,6 +55,47 @@ const REBUILD_FIELDS = [
   "isActive", "visibility", "hiddenBy", "images", "thumbnail",
   "brand", "brandSlug", "categoryPath", "department", "parentCategory", "childCategory",
 ];
+
+// Extra fields for products added by hand (the rebuild doesn't write them for
+// those, so they need no lock).
+const MANUAL_EDITABLE = {
+  sku: (v) => String(v || "").trim().slice(0, 60),
+  descriptionText: (v) => String(v || "").trim().slice(0, 5000),
+  features: (v) => linesOf(v),
+};
+
+/** "Motor: 2 HP\nFoldable" or ["Motor: 2 HP", "Foldable"] -> ["Motor: 2 HP", "Foldable"] */
+function linesOf(value) {
+  const lines = Array.isArray(value) ? value : String(value || "").split("\n");
+  return lines.map((l) => String(l).replace(/^[\s•*-]+/, "").trim()).filter(Boolean).slice(0, 40).map((l) => l.slice(0, 200));
+}
+
+/** Specification boxes on the product page come from "Name: value" feature lines, as for supplier products. */
+function applyFeatures(product) {
+  const { specifications, highlights } = extractSpecifications(product.features || []);
+  product.specifications = specifications;
+  product.highlights = highlights;
+  product.warranty = specifications.Warranty || "";
+  product.maxUserWeight = specifications["Max User Weight"] || "";
+  product.dimensions = specifications.Dimensions || "";
+  product.weight = specifications.Weight || "";
+}
+
+function seoFor(product) {
+  const text = String(product.descriptionText || "").replace(/\s+/g, " ").trim();
+  return {
+    title: `${product.name} | Kreedum Sports Lucknow`,
+    description: (text.length > 160 ? `${text.slice(0, 157)}...` : text) || `${product.name} available at Kreedum Sports Lucknow.`,
+    keywords: product.searchKeywords || [],
+  };
+}
+
+async function uniqueProductSlug(name, sku) {
+  const base = sku ? `${generateSlug(name)}-${generateSlug(sku)}` : generateSlug(name);
+  let slug = base || `product-${Date.now()}`;
+  for (let n = 2; await Product.exists({ slug }); n++) slug = `${base}-${n}`;
+  return slug;
+}
 
 function price(value, label) {
   const number = Number(value);
@@ -84,6 +133,7 @@ function listItem(p) {
     stockStatus: p.stockStatus,
     live: isLive(p),
     adminLocked: p.adminLocked || [],
+    manual: isManual(p),
   };
 }
 
@@ -114,7 +164,11 @@ async function updateCounts(before, after) {
   if (into.length) ops.push(Category.updateMany({ slug: { $in: into } }, { $inc: { productCount: 1 } }));
   if (was.brandSlug !== now.brandSlug) {
     if (was.brandSlug) ops.push(Brand.updateOne({ slug: was.brandSlug }, { $inc: { productCount: -1 } }));
-    if (now.brandSlug) ops.push(Brand.updateOne({ slug: now.brandSlug }, { $inc: { productCount: 1 } }));
+    // $set isActive: a brand the last rebuild switched off for having no products is back.
+    if (now.brandSlug) {
+      ops.push(Brand.updateOne({ slug: now.brandSlug }, { $inc: { productCount: 1 } }));
+      ops.push(Brand.updateOne({ slug: now.brandSlug, adminHidden: { $ne: true } }, { $set: { isActive: true } }));
+    }
   }
   await Promise.all(ops);
 }
@@ -164,6 +218,7 @@ class AdminProductService {
       badge: product.badge, displayOrder: product.displayOrder, visibility: product.visibility,
       isActive: product.isActive, hiddenBy: product.hiddenBy, sourceUrl: product.sourceUrl,
       categoryPath: product.categoryPath || [], brandSlug: product.brandSlug, supplier: product.supplier,
+      manual: isManual(product), descriptionText: product.descriptionText || "", features: product.features || [],
       updatedAt: product.updatedAt };
   }
 
@@ -188,6 +243,18 @@ class AdminProductService {
         product[field] = value;
         changed.add(field);
       }
+    }
+
+    if (isManual(product)) {
+      for (const [field, clean] of Object.entries(MANUAL_EDITABLE)) {
+        if (body[field] === undefined) continue;
+        const value = clean(body[field]);
+        if (JSON.stringify(product[field] ?? "") !== JSON.stringify(value)) {
+          product[field] = value;
+          changed.add(field);
+        }
+      }
+      if (changed.has("features")) applyFeatures(product);
     }
 
     if (body.live !== undefined) {
@@ -241,9 +308,12 @@ class AdminProductService {
       }
     }
 
-    if (changed.has("brand") || changed.has("categoryPath")) {
+    if (["brand", "categoryPath", "name", "sku"].some((f) => changed.has(f))) {
       const categories = await Category.find({ slug: { $in: product.categoryPath || [] } }, { slug: 1, name: 1 }).lean();
       product.searchKeywords = searchKeywordsFor(product, new Map(categories.map((c) => [c.slug, c])));
+    }
+    if (isManual(product) && ["name", "descriptionText", "brand", "categoryPath"].some((f) => changed.has(f))) {
+      product.seo = seoFor(product);
     }
 
     if (Array.isArray(body.variants) && product.variants?.length) {
@@ -289,13 +359,83 @@ class AdminProductService {
 
     if (!changed.size) return this.get(productId);
 
-    const locks = new Set(product.adminLocked || []);
-    for (const field of changed) if (REBUILD_FIELDS.includes(field)) locks.add(field);
-    product.adminLocked = [...locks];
+    // Products added by hand have no supplier values to protect: no locks.
+    if (!isManual(product)) {
+      const locks = new Set(product.adminLocked || []);
+      for (const field of changed) if (REBUILD_FIELDS.includes(field)) locks.add(field);
+      product.adminLocked = [...locks];
+    }
 
     await product.save();
     await updateCounts(before, { path: product.categoryPath || [], brandSlug: product.brandSlug, live: isLive(product) });
     return this.get(productId);
+  }
+
+  /**
+   * Add a product by hand.
+   * body: { name, brand, categorySlug, sellingPrice?, mrp?, stockStatus?, availabilityMessage?,
+   *         sku?, descriptionText?, features? (lines), live? }
+   * No price (0) = "Price on enquiry". Photos are added afterwards with addImage.
+   */
+  async create(body = {}) {
+    const name = EDITABLE.name(body.name);
+    if (!body.brand) throw new HttpError(400, "Choose or type a brand.");
+    if (!body.categorySlug) throw new HttpError(400, "Choose a category.");
+    const sku = MANUAL_EDITABLE.sku(body.sku);
+    const sellingPrice = body.sellingPrice === undefined || body.sellingPrice === "" ? 0 : price(body.sellingPrice, "Selling price");
+    const mrpInput = body.mrp === undefined || body.mrp === "" ? 0 : price(body.mrp, "MRP");
+    const mrp = Math.max(mrpInput, sellingPrice);
+    const stockStatus = sellingPrice
+      ? EDITABLE.stockStatus(body.stockStatus || "in_stock")
+      : "enquiry_only"; // no price: customers enquire
+
+    const product = await Product.create({
+      supplier: MANUAL,
+      sourceUrl: "",
+      name,
+      slug: await uniqueProductSlug(name, sku),
+      sku,
+      brand: "-", // set just below, with the brand checks
+      brandSlug: "-",
+      mrp,
+      sellingPrice,
+      discountPercent: discountOf(mrp, sellingPrice),
+      maxPrice: sellingPrice,
+      stockStatus,
+      availabilityMessage: EDITABLE.availabilityMessage(body.availabilityMessage) || "Contact Kreedum Sports for product availability.",
+      descriptionText: MANUAL_EDITABLE.descriptionText(body.descriptionText),
+      features: MANUAL_EDITABLE.features(body.features),
+      isActive: false, // counted in when it goes live below
+      visibility: "hidden",
+      hiddenBy: "admin",
+      lastSyncedAt: new Date(),
+    });
+    try {
+      applyFeatures(product);
+      await product.save();
+      // Brand, category, search words, SEO and on/off go through the normal edit.
+      return await this.update(String(product._id), {
+        brand: body.brand,
+        categorySlug: body.categorySlug,
+        live: body.live !== false,
+      });
+    } catch (error) {
+      await Product.deleteOne({ _id: product._id }); // bad brand / category: nothing half-made
+      throw error;
+    }
+  }
+
+  /** Delete a product added by hand. Supplier products can only be hidden. */
+  async remove(productId) {
+    checkId(productId);
+    const product = await Product.findById(productId);
+    if (!product) throw new HttpError(404, "Product not found.");
+    if (!isManual(product)) {
+      throw new HttpError(400, "Only products added here can be deleted. Hide this one instead.");
+    }
+    await Product.deleteOne({ _id: product._id });
+    await updateCounts({ path: product.categoryPath || [], brandSlug: product.brandSlug, live: isLive(product) }, { path: [], brandSlug: null, live: false });
+    return { deleted: true };
   }
 
   /** Add a photo (uploaded to Cloudinary kreedum/products). */
@@ -310,7 +450,7 @@ class AdminProductService {
     });
     product.images = makeMain ? [url, ...(product.images || [])] : [...(product.images || []), url];
     product.thumbnail = product.images[0];
-    product.adminLocked = [...new Set([...(product.adminLocked || []), "images", "thumbnail"])];
+    if (!isManual(product)) product.adminLocked = [...new Set([...(product.adminLocked || []), "images", "thumbnail"])];
     await product.save();
     return this.get(productId);
   }

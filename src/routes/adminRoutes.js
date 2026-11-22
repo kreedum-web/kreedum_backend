@@ -110,9 +110,11 @@ router.patch("/orders/:id/status", handle((req) => orders.updateStatus(req.param
 /**
  * @swagger
  * /api/v1/admin/products:
- *   get: { summary: "Products (?q=&brand=&department=&state=live|hidden|locked&stock=&page=)", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   get: { summary: "Products (?q=&brand=&department=&category=&state=live|hidden|locked&stock=&page=)", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   post: { summary: "Add a product by hand: { name, brand, categorySlug, sellingPrice, mrp, stockStatus, sku, descriptionText, features, live }", tags: [Admin], security: [{ bearerAuth: [] }] }
  * /api/v1/admin/products/{id}:
  *   get: { summary: "One product", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   delete: { summary: "Delete a product added by hand", tags: [Admin], security: [{ bearerAuth: [] }] }
  *   patch: { summary: "Change price, name, stock, on/off, option prices, photo order, brand ({ brand }), category ({ categorySlug })", tags: [Admin], security: [{ bearerAuth: [] }] }
  * /api/v1/admin/products/{id}/images:
  *   post: { summary: "Add a photo: { data: 'data:image/…', makeMain }", tags: [Admin], security: [{ bearerAuth: [] }] }
@@ -124,7 +126,9 @@ router.patch("/orders/:id/status", handle((req) => orders.updateStatus(req.param
  *   patch: { summary: "{ live, featured, description, logo }", tags: [Admin], security: [{ bearerAuth: [] }] }
  */
 router.get("/products", handle((req) => products.list(req.query)));
+router.post("/products", handle((req) => products.create(req.body)));
 router.get("/products/:id", handle((req) => products.get(req.params.id)));
+router.delete("/products/:id", handle((req) => products.remove(req.params.id)));
 router.patch("/products/:id", handle((req) => products.update(req.params.id, req.body)));
 router.post("/products/:id/images", handle((req) => products.addImage(req.params.id, req.body)));
 router.post("/products/:id/reset", handle((req) => products.resetToSupplier(req.params.id)));

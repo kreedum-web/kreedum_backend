@@ -117,7 +117,7 @@ function mockDb(t, product, { categories = [], brands = [] } = {}) {
   t.mock.method(Brand, "create", async (doc) => created.push(doc));
   const incs = [];
   t.mock.method(Category, "updateMany", async (q, u) => incs.push(["category", q.slug.$in, u.$inc.productCount]));
-  t.mock.method(Brand, "updateOne", async (q, u) => incs.push(["brand", q.slug, u.$inc.productCount]));
+  t.mock.method(Brand, "updateOne", async (q, u) => u.$inc && incs.push(["brand", q.slug, u.$inc.productCount]));
   return { created, incs };
 }
 

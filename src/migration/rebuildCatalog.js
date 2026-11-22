@@ -334,11 +334,18 @@ function planRebuild({
   );
 
   // ---------- counts (what the website will show)
-  const visible = products.map((p) => p.update.$set).filter((p) => p.isActive && p.visibility === "published");
+  // Products this run doesn't touch (added by hand in the admin, or from a
+  // supplier with no feed this time) stay as they are, so they count too.
+  const removedIds = new Set(removed.map((p) => String(p._id)));
+  const untouched = existingProducts.filter(
+    (p) => !(p.sourceUrl && supplierUrls.has(p.sourceUrl)) && !removedIds.has(String(p._id))
+  );
+  const built = products.map((p) => p.update.$set);
+  const visible = [...built, ...untouched].filter((p) => p.isActive && p.visibility === "published");
 
   const categoryCounts = new Map(categories.map((c) => [c.slug, 0]));
   for (const p of visible) {
-    for (const slug of p.categoryPath) categoryCounts.set(slug, (categoryCounts.get(slug) || 0) + 1);
+    for (const slug of p.categoryPath || []) categoryCounts.set(slug, (categoryCounts.get(slug) || 0) + 1);
   }
 
   const brandCounts = new Map();
@@ -370,7 +377,8 @@ function planRebuild({
       ).size,
       newProducts: products.filter((p) => !p.existing).length,
       visibleProducts: visible.length,
-      hiddenProducts: products.length - visible.length,
+      hiddenProducts: built.filter((p) => !(p.isActive && p.visibility === "published")).length,
+      untouchedProducts: untouched.length, // e.g. added by hand in the admin
       productsRemovedFromMetro: removed.length, // gone from their supplier's feed (name kept for the dashboard)
       productsBySupplier: [...suppliersInRun].reduce(
         (acc, s) => ({ ...acc, [s]: products.filter((p) => supplierOf(p.sp) === s).length }),
