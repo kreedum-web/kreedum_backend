@@ -130,7 +130,7 @@ async function submitContact(body = {}, { user = null, ip = "" } = {}) {
 // ------------------------------------------------------------ WhatsApp clicks
 
 const REPEAT_WINDOW_MS = 30 * 60 * 1000; // same person + product within 30 min = one enquiry
-const SOURCES = ["floating", "product-page", "footer", "contact-page", "bulk-page", "order-help", "other"];
+const SOURCES = ["floating", "product-page", "product-card", "footer", "contact-page", "bulk-page", "order-help", "other"];
 
 /**
  * A WhatsApp button was pressed on the website. We can't see the message
@@ -145,7 +145,7 @@ async function logWhatsappClick(body = {}, { user = null, ip = "" } = {}) {
   const source = SOURCES.includes(body.source) ? body.source : "other";
   const slug = clip(body.productSlug, 200);
   const product = slug ? await Product.findOne({ slug }, { name: 1, slug: 1, sku: 1 }).lean() : null;
-  const kind = source === "product-page" && product ? "product" : "whatsapp";
+  const kind = (source === "product-page" || source === "product-card") && product ? "product" : "whatsapp";
 
   // Pressed again soon after (or opened WhatsApp twice): count it, don't re-alert.
   const who = user ? { user: user._id } : { visitorId, user: null };

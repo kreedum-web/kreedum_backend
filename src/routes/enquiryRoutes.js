@@ -91,7 +91,7 @@ router.post(
  *             type: object
  *             properties:
  *               visitorId: { type: string }
- *               source: { type: string, enum: [floating, product-page, footer, contact-page, bulk-page, order-help, other] }
+ *               source: { type: string, enum: [floating, product-page, product-card, footer, contact-page, bulk-page, order-help, other] }
  *               productSlug: { type: string }
  *               sku: { type: string }
  *               quantity: { type: number }
