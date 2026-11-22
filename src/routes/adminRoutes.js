@@ -8,6 +8,7 @@ const content = require("../services/admin/adminContentService");
 const stats = require("../services/admin/adminStatsService");
 const notifications = require("../services/admin/adminNotificationService");
 const carts = require("../services/admin/adminCartService");
+const categories = require("../services/admin/adminCategoryService");
 
 /**
  * Admin dashboard API (admin.kreedum.com). Every route needs a signed-in
@@ -112,7 +113,7 @@ router.patch("/orders/:id/status", handle((req) => orders.updateStatus(req.param
  *   get: { summary: "Products (?q=&brand=&department=&state=live|hidden|locked&stock=&page=)", tags: [Admin], security: [{ bearerAuth: [] }] }
  * /api/v1/admin/products/{id}:
  *   get: { summary: "One product", tags: [Admin], security: [{ bearerAuth: [] }] }
- *   patch: { summary: "Change price, name, stock, on/off, option prices, photo order", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   patch: { summary: "Change price, name, stock, on/off, option prices, photo order, brand ({ brand }), category ({ categorySlug })", tags: [Admin], security: [{ bearerAuth: [] }] }
  * /api/v1/admin/products/{id}/images:
  *   post: { summary: "Add a photo: { data: 'data:image/…', makeMain }", tags: [Admin], security: [{ bearerAuth: [] }] }
  * /api/v1/admin/products/{id}/reset:
@@ -129,6 +130,24 @@ router.post("/products/:id/images", handle((req) => products.addImage(req.params
 router.post("/products/:id/reset", handle((req) => products.resetToSupplier(req.params.id)));
 router.get("/brands", handle(() => products.listBrands()));
 router.patch("/brands/:slug", handle((req) => products.updateBrand(req.params.slug, req.body)));
+
+// ---------------------------------------------------------------- categories
+/**
+ * @swagger
+ * /api/v1/admin/categories:
+ *   get: { summary: "All categories (menu order) with product counts", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   post: { summary: "New category: { name, parentSlug (empty = top level), displayOrder? }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/categories/{slug}:
+ *   patch: { summary: "{ name, displayOrder, isActive }: kept by the catalogue rebuild", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   delete: { summary: "Delete a category made in the admin (empty, no sub-categories)", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/categories/{slug}/reset:
+ *   post: { summary: "Forget edits on a supplier category; next rebuild restores Metro's values", tags: [Admin], security: [{ bearerAuth: [] }] }
+ */
+router.get("/categories", handle(() => categories.list()));
+router.post("/categories", handle((req) => categories.create(req.body)));
+router.patch("/categories/:slug", handle((req) => categories.update(req.params.slug, req.body)));
+router.delete("/categories/:slug", handle((req) => categories.remove(req.params.slug)));
+router.post("/categories/:slug/reset", handle((req) => categories.reset(req.params.slug)));
 
 // ---------------------------------------------------------------- site content
 /**

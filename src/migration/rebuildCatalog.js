@@ -52,6 +52,7 @@ const { productImageUrls, isOwnImage, withOwnImages } = require("../utils/produc
 const ImageAsset = require("../models/ImageAsset");
 const { isHiddenBrand, applyRenameToSupplierProduct } = require("../utils/brandRules");
 const { withCategoryRules, movedCategoryPath } = require("../utils/categoryRules");
+const { withAdminCategories } = require("../utils/adminCategories");
 
 const SUPPLIER = "metrosports"; // Metro's products; catalog_feed products carry their own `supplier`
 const FEED_COLLECTION = "catalog_feed";
@@ -245,14 +246,27 @@ function buildProduct(original, tree, existing, usedSlugs, issues) {
  */
 function keepAdminChoices(update, existing, adminHiddenBrands = new Set()) {
   const $set = update.$set;
-  if (adminHiddenBrands.has($set.brandSlug)) {
+  const locked = new Set(existing?.adminLocked || []);
+  // A brand chosen in the admin counts for the brand switch-off too.
+  const brandSlug = locked.has("brandSlug") && existing.brandSlug !== undefined ? existing.brandSlug : $set.brandSlug;
+  if (adminHiddenBrands.has(brandSlug)) {
     Object.assign($set, { isActive: false, visibility: "hidden", hiddenBy: "admin-brand" });
   }
-  for (const field of existing?.adminLocked || []) {
+  for (const field of locked) {
     if (existing[field] !== undefined) $set[field] = existing[field];
   }
   return update;
 }
+
+function withAdminBrandAndCategory(sp, existing, tree) {
+  const locked = new Set(existing?.adminLocked || []);
+  const out = { ...sp };
+  const leaf = existing?.categoryPath?.at(-1);
+  if (locked.has("categoryPath") && leaf && tree.has(leaf)) out.categorySlug = leaf;
+  if (locked.has("brand") && existing.brand) out.brand = existing.brand;
+  return out;
+}
+
 
 /**
  * Work out every change without touching the database.
@@ -274,8 +288,11 @@ function planRebuild({
   if (!metroCategories.length) {
     throw new Error("No category tree in kreedum_supplier_sync. Run `npm run categories` in the scraper first.");
   }
-  const { categories, problems } = withCategoryRules(metroCategories);
-  problems.forEach((message) => issues.push({ code: "category_rule_problem", message }));
+  const withRules = withCategoryRules(metroCategories);
+  withRules.problems.forEach((message) => issues.push({ code: "category_rule_problem", message }));
+  // Categories made / edited in the admin dashboard are kept (src/utils/adminCategories.js).
+  const { categories, problems: adminProblems } = withAdminCategories(withRules.categories, existingCategories);
+  adminProblems.forEach((message) => issues.push({ code: "admin_category_problem", message }));
   const tree = new Map(categories.map((c) => [c.slug, c]));
   const staleCategories = existingCategories.filter((c) => !tree.has(c.slug)).map((c) => c.slug);
 
@@ -299,7 +316,9 @@ function planRebuild({
     .map(({ sp, existing }) => {
       // Photos already copied to our Cloudinary are used instead of the supplier's.
       const withImages = withOwnImages(sp, imageMap);
-      const update = buildProduct(withImages, tree, existing, usedSlugs, issues);
+      // Brand / category chosen in the admin: build the product with them, so
+      // its visibility, menu path and search words follow the admin's choice.
+      const update = buildProduct(withAdminBrandAndCategory(withImages, existing, tree), tree, existing, usedSlugs, issues);
       return { sp, existing, update: keepAdminChoices(update, existing, adminHiddenBrands) };
     });
 
@@ -505,8 +524,10 @@ async function main() {
     Product.find({}, {
       sourceUrl: 1, supplier: 1, slug: 1, visibility: 1, isActive: 1, adminLocked: 1, name: 1, mrp: 1, sellingPrice: 1,
       discountPercent: 1, maxPrice: 1, variants: 1, hiddenBy: 1, images: 1, thumbnail: 1,
+      brand: 1, brandSlug: 1, department: 1, parentCategory: 1, childCategory: 1, categoryPath: 1,
     }).lean(),
-    Category.find({}, { slug: 1 }).lean(),
+    // Full documents: admin-made categories and admin edits are kept.
+    Category.find({}).lean(),
     Brand.find({}, { slug: 1, adminHidden: 1 }).lean(),
     ImageAsset.find({}, { sourceUrl: 1, url: 1 }).lean(),
   ]);

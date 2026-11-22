@@ -38,9 +38,17 @@ const categorySchema = new mongoose.Schema(
     },
 
     // "category-rule": added by src/config/categoryRules.js, not from Metro's menu
+    // "admin": created in the admin dashboard (kept by every catalogue rebuild)
     addedBy: {
       type: String,
       default: "",
+    },
+
+    // Fields changed in the admin dashboard (name, displayOrder, isActive):
+    // the catalogue rebuild keeps them.
+    adminLocked: {
+      type: [String],
+      default: [],
     },
 
     productCount: {

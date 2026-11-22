@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const Product = require("../../models/Product");
 const Brand = require("../../models/Brand");
+const Category = require("../../models/Category");
+const generateSlug = require("../../utils/generateSlug");
+const { isHiddenBrand } = require("../../utils/brandRules");
+const { searchKeywordsFor } = require("../../utils/searchKeywords");
 const HttpError = require("../../utils/httpError");
 const { uploadImage } = require("../../utils/cloudinaryFolders");
 
@@ -13,6 +17,9 @@ const { uploadImage } = require("../../utils/cloudinaryFolders");
  * an admin's price, name, photos or on/off choice survives the next Metro
  * sync. "Reset to supplier" clears the locks; the next rebuild then brings
  * back Metro's values.
+ *
+ * Brand and category can be changed too (also locked): the rebuild then
+ * builds the product with the admin's brand and category.
  */
 
 // Fields the admin may change, and the cleaner for each.
@@ -38,6 +45,7 @@ const EDITABLE = {
 const REBUILD_FIELDS = [
   "name", "mrp", "sellingPrice", "discountPercent", "maxPrice", "variants",
   "isActive", "visibility", "hiddenBy", "images", "thumbnail",
+  "brand", "brandSlug", "categoryPath", "department", "parentCategory", "childCategory",
 ];
 
 function price(value, label) {
@@ -65,7 +73,9 @@ function listItem(p) {
     slug: p.slug,
     sku: p.sku,
     brand: p.brand,
+    brandSlug: p.brandSlug,
     department: p.department,
+    categoryPath: p.categoryPath || [],
     thumbnail: p.thumbnail || p.images?.[0] || "",
     sellingPrice: p.sellingPrice,
     mrp: p.mrp,
@@ -88,6 +98,25 @@ function checkImageData(data) {
   }
   if (data.length > 11 * 1024 * 1024) throw new HttpError(413, "Picture is too big (max 8 MB).");
   return data;
+}
+
+/**
+ * Keep the menu's product counts right after a product changes category,
+ * brand or on/off (the next rebuild recounts everything anyway).
+ */
+async function updateCounts(before, after) {
+  const was = before.live ? before : { path: [], brandSlug: null };
+  const now = after.live ? after : { path: [], brandSlug: null };
+  const out = was.path.filter((slug) => !now.path.includes(slug));
+  const into = now.path.filter((slug) => !was.path.includes(slug));
+  const ops = [];
+  if (out.length) ops.push(Category.updateMany({ slug: { $in: out } }, { $inc: { productCount: -1 } }));
+  if (into.length) ops.push(Category.updateMany({ slug: { $in: into } }, { $inc: { productCount: 1 } }));
+  if (was.brandSlug !== now.brandSlug) {
+    if (was.brandSlug) ops.push(Brand.updateOne({ slug: was.brandSlug }, { $inc: { productCount: -1 } }));
+    if (now.brandSlug) ops.push(Brand.updateOne({ slug: now.brandSlug }, { $inc: { productCount: 1 } }));
+  }
+  await Promise.all(ops);
 }
 
 class AdminProductService {
@@ -133,7 +162,8 @@ class AdminProductService {
       isBestSeller: product.isBestSeller, isNewArrival: product.isNewArrival, isTrending: product.isTrending,
       badge: product.badge, displayOrder: product.displayOrder, visibility: product.visibility,
       isActive: product.isActive, hiddenBy: product.hiddenBy, sourceUrl: product.sourceUrl,
-      categoryPath: product.categoryPath || [], updatedAt: product.updatedAt };
+      categoryPath: product.categoryPath || [], brandSlug: product.brandSlug, supplier: product.supplier,
+      updatedAt: product.updatedAt };
   }
 
   /**
@@ -149,6 +179,7 @@ class AdminProductService {
     if (!product) throw new HttpError(404, "Product not found.");
 
     const changed = new Set();
+    const before = { path: [...(product.categoryPath || [])], brandSlug: product.brandSlug, live: isLive(product) };
     for (const [field, clean] of Object.entries(EDITABLE)) {
       if (body[field] === undefined) continue;
       const value = clean(body[field]);
@@ -166,6 +197,52 @@ class AdminProductService {
         product.hiddenBy = live ? "" : "admin";
         ["isActive", "visibility", "hiddenBy"].forEach((f) => changed.add(f));
       }
+    }
+
+    // ---- brand: { brand: "Kreedum" } (an existing brand, or a new one)
+    if (body.brand !== undefined) {
+      const name = String(body.brand || "").replace(/\s+/g, " ").trim();
+      if (name.length < 2 || name.length > 60) throw new HttpError(400, "Brand name must be 2–60 characters.");
+      const slug = generateSlug(name);
+      const known = await Brand.findOne({ slug }).lean();
+      const brandName = known?.name || name;
+      if (product.brandSlug !== slug || product.brand !== brandName) {
+        product.brand = brandName;
+        product.brandSlug = slug;
+        changed.add("brand").add("brandSlug");
+        if (!known) await Brand.create({ name: brandName, slug, isActive: true, productCount: 0 }).catch(() => {});
+        // Brand switched off (admin) or not sold (brandRules.js): the product follows.
+        if (known?.adminHidden) {
+          Object.assign(product, { isActive: false, visibility: "hidden", hiddenBy: "admin-brand" });
+          ["isActive", "visibility", "hiddenBy"].forEach((f) => changed.add(f));
+        } else if (isHiddenBrand(slug)) {
+          Object.assign(product, { isActive: false, visibility: "hidden", hiddenBy: "brand-rule" });
+          ["isActive", "visibility", "hiddenBy"].forEach((f) => changed.add(f));
+        } else if (["admin-brand", "brand-rule"].includes(product.hiddenBy)) {
+          // It was hidden only because of its old brand.
+          Object.assign(product, { isActive: true, visibility: "published", hiddenBy: "" });
+          ["isActive", "visibility", "hiddenBy"].forEach((f) => changed.add(f));
+        }
+      }
+    }
+
+    // ---- category: { categorySlug: "walking-pads" } (any category, any level)
+    if (body.categorySlug !== undefined) {
+      const category = await Category.findOne({ slug: String(body.categorySlug || "") }).lean();
+      if (!category) throw new HttpError(400, "Category not found.");
+      const path = category.path?.length ? category.path : [category.slug];
+      if (JSON.stringify(path) !== JSON.stringify(product.categoryPath || [])) {
+        product.categoryPath = path;
+        product.department = path[0] || "";
+        product.parentCategory = path[1] || "";
+        product.childCategory = path[2] || "";
+        ["categoryPath", "department", "parentCategory", "childCategory"].forEach((f) => changed.add(f));
+      }
+    }
+
+    if (changed.has("brand") || changed.has("categoryPath")) {
+      const categories = await Category.find({ slug: { $in: product.categoryPath || [] } }, { slug: 1, name: 1 }).lean();
+      product.searchKeywords = searchKeywordsFor(product, new Map(categories.map((c) => [c.slug, c])));
     }
 
     if (Array.isArray(body.variants) && product.variants?.length) {
@@ -216,6 +293,7 @@ class AdminProductService {
     product.adminLocked = [...locks];
 
     await product.save();
+    await updateCounts(before, { path: product.categoryPath || [], brandSlug: product.brandSlug, live: isLive(product) });
     return this.get(productId);
   }
 
