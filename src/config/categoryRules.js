@@ -28,6 +28,9 @@ module.exports = {
     { slug: "cricket", name: "Cricket", parent: "sports" },
     { slug: "other-sports", name: "Other Sports", parent: "sports" },
     { slug: "shoes", name: "Shoes", parent: null },
+    // Added 22 Nov 2026
+    { slug: "walking-pads", name: "Walking Pads", parent: "cardio" },
+    { slug: "home-gym-sets", name: "Home Gym Sets", parent: "weights-bars" },
   ],
 
   // Move products by words in their name. Only products currently anywhere
@@ -35,6 +38,8 @@ module.exports = {
   // more specific rules first. Products no rule matches stay where they are
   // (the dry run lists them).
   productMoves: [
+    // Metro lists walking pads under Domestic Treadmill.
+    { from: "domestic-treadmill", to: "walking-pads", words: ["walking pad", "walkpad", "walk pad"] },
     // Weightlifting gloves aren't boxing gear.
     { from: "boxing-and-punching-bags", to: "gym-gloves", words: ["weightlifting glove", "weight lifting glove", "air vent glove"] },
     {
