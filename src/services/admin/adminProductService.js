@@ -121,9 +121,9 @@ async function updateCounts(before, after) {
 
 class AdminProductService {
   /**
-   * @param {{ q?: string, brand?: string, department?: string, state?: "live"|"hidden"|"locked", stock?: string, page?: number }} filters
+   * @param {{ q?: string, brand?: string, department?: string, category?: string, state?: "live"|"hidden"|"locked", stock?: string, page?: number }} filters
    */
-  async list({ q = "", brand = "", department = "", state = "", stock = "", page = 1, limit = 25 } = {}) {
+  async list({ q = "", brand = "", department = "", category = "", state = "", stock = "", page = 1, limit = 25 } = {}) {
     const filter = {};
     const text = String(q || "").trim();
     if (text) {
@@ -132,6 +132,7 @@ class AdminProductService {
     }
     if (brand) filter.brandSlug = brand;
     if (department) filter.department = department;
+    if (category) filter.categoryPath = String(category); // that category or anything inside it
     if (stock) filter.stockStatus = stock;
     if (state === "live") Object.assign(filter, { isActive: true, visibility: "published" });
     if (state === "hidden") filter.$and = [{ $or: [{ isActive: false }, { visibility: { $ne: "published" } }] }];
