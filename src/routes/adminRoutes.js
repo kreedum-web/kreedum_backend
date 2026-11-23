@@ -147,7 +147,7 @@ router.patch("/brands/:slug", handle((req) => products.updateBrand(req.params.sl
  * /api/v1/admin/categories/{slug}/reset:
  *   post: { summary: "Forget edits on a supplier category; next rebuild restores Metro's values", tags: [Admin], security: [{ bearerAuth: [] }] }
  */
-router.get("/categories", handle(() => categories.list()));
+router.get("/categories", handle((req) => categories.list(req.query)));
 router.post("/categories", handle((req) => categories.create(req.body)));
 router.patch("/categories/:slug", handle((req) => categories.update(req.params.slug, req.body)));
 router.delete("/categories/:slug", handle((req) => categories.remove(req.params.slug)));

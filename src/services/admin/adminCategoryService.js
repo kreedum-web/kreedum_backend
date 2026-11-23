@@ -43,40 +43,70 @@ function item(c, counts) {
 }
 
 class AdminCategoryService {
-  /** Every category, parents before children, with product counts. */
-  async list() {
+   /** Every category, parents before children, with filtered product counts. */
+  async list({ brand = "", department = "" } = {}) {
+    const productMatch = {};
+
+    if (brand) productMatch.brandSlug = String(brand);
+    if (department) productMatch.department = String(department);
+
     const [categories, counts] = await Promise.all([
       Category.find({}).lean(),
       Product.aggregate([
+        ...(Object.keys(productMatch).length
+          ? [{ $match: productMatch }]
+          : []),
         { $unwind: "$categoryPath" },
         {
           $group: {
             _id: "$categoryPath",
             total: { $sum: 1 },
-            live: { $sum: { $cond: [{ $and: ["$isActive", { $eq: ["$visibility", "published"] }] }, 1, 0] } },
+            live: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      "$isActive",
+                      { $eq: ["$visibility", "published"] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
           },
         },
       ]),
     ]);
-    const byId = new Map(counts.map((c) => [c._id, { total: c.total, live: c.live }]));
+
+    const byId = new Map(
+      counts.map((c) => [c._id, { total: c.total, live: c.live }])
+    );
+
     const bySlug = new Map(categories.map((c) => [c.slug, c]));
-    // Sort by the menu: parent's order first, then the child's.
+
     const key = (c) =>
       (c.path || [c.slug]).map((slug) => {
         const node = bySlug.get(slug);
         return `${String(node?.displayOrder ?? 0).padStart(4, "0")}:${node?.name || slug}`;
       });
+
     const sorted = [...categories].sort((a, b) => {
       const ka = key(a);
       const kb = key(b);
+
       for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
         if (ka[i] === undefined) return -1;
         if (kb[i] === undefined) return 1;
+
         const cmp = ka[i].localeCompare(kb[i]);
         if (cmp) return cmp;
       }
+
       return 0;
     });
+
     return sorted.map((c) => item(c, byId));
   }
 
