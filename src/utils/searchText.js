@@ -132,16 +132,73 @@ function parsePrice(query) {
  * @returns {{ words: string[][], minPrice?, maxPrice?, text }}
  *   words: one entry per typed word, each a list of forms that count as that word
  */
-function parseQuery(query) {
+function parseQuery(query, groups = []) {
   const { text, minPrice, maxPrice } = parsePrice(String(query ?? "").slice(0, 200));
+  const typed = normalize(text)
+    .split(" ")
+    .filter((word) => word && !STOP_WORDS.has(word));
+  // Spellings set in the admin: a phrase of a group becomes that group's word.
+  const tokens = replacePhrases(typed.map(stem), groups);
   const words = [];
-  for (const word of normalize(text).split(" ")) {
-    if (!word || STOP_WORDS.has(word)) continue;
-    const forms = new Set([stem(word)]);
-    for (const alt of SYNONYMS[word] || SYNONYMS[stem(word)] || []) forms.add(stem(alt));
+  tokens.forEach((token) => {
+    if (token.startsWith(GROUP_PREFIX)) return words.push([token]);
+    const forms = new Set([token]);
+    for (const alt of SYNONYMS[token] || []) forms.add(stem(alt));
     words.push([...forms]);
-  }
+  });
   return { words: dedupe(words), minPrice, maxPrice, text };
+}
+
+// ------------------------------------------------------------------ admin spellings
+
+/**
+ * Groups of words / phrases that mean the same, from the admin:
+ * [{ id, phrases: ["walking pad", "walkpad"] }] → [{ id, phrases: [["walking", "pad"], ["walkpad"]] }]
+ * Products containing any phrase get the group's word ("syn:<id>"); so does a
+ * search typing any phrase, so they find each other.
+ */
+const GROUP_PREFIX = "syn:";
+
+function prepareGroups(groups = []) {
+  return groups
+    .map((g) => ({
+      id: String(g.id ?? g._id),
+      phrases: (g.phrases || []).map((p) => normalize(p).split(" ").filter(Boolean).map(stem)).filter((p) => p.length),
+    }))
+    .filter((g) => g.phrases.length >= 2);
+}
+
+/**
+ * Stemmed words with group phrases replaced by the group's word (longest first).
+ * Keeps one entry per original position: the phrase's first word becomes the
+ * group word, the rest are dropped.
+ */
+function replacePhrases(tokens, groups = []) {
+  if (!groups.length) return tokens;
+  const out = [];
+  for (let i = 0; i < tokens.length; ) {
+    let best = null;
+    for (const g of groups) {
+      for (const phrase of g.phrases) {
+        if (phrase.length > (best?.length || 0) && phrase.every((w, k) => tokens[i + k] === w)) best = { id: g.id, length: phrase.length };
+      }
+    }
+    if (best) {
+      out.push(`${GROUP_PREFIX}${best.id}`);
+      i += best.length;
+    } else {
+      out.push(tokens[i]);
+      i++;
+    }
+  }
+  return out;
+}
+
+/** Group words for a text of a product (the phrases it contains). */
+function groupTermsOf(text, groups = []) {
+  if (!groups.length) return [];
+  const tokens = normalize(text).split(" ").filter(Boolean).map(stem);
+  return replacePhrases(tokens, groups).filter((t) => t.startsWith(GROUP_PREFIX));
 }
 
 function dedupe(words) {
@@ -194,4 +251,17 @@ function wordMatch(typed, term) {
   return 0;
 }
 
-module.exports = { normalize, stem, termsOf, parsePrice, parseQuery, editDistance, wordMatch, STOP_WORDS };
+module.exports = {
+  normalize,
+  stem,
+  termsOf,
+  parsePrice,
+  parseQuery,
+  editDistance,
+  wordMatch,
+  STOP_WORDS,
+  GROUP_PREFIX,
+  prepareGroups,
+  replacePhrases,
+  groupTermsOf,
+};

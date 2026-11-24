@@ -10,6 +10,7 @@ const notifications = require("../services/admin/adminNotificationService");
 const carts = require("../services/admin/adminCartService");
 const categories = require("../services/admin/adminCategoryService");
 const homeSections = require("../services/admin/adminHomeSectionService");
+const search = require("../services/admin/adminSearchService");
 
 /**
  * Admin dashboard API (admin.kreedum.com). Every route needs a signed-in
@@ -154,6 +155,31 @@ router.patch("/brands/:slug", handle((req) => products.updateBrand(req.params.sl
  */
 router.get("/categories", handle((req) => categories.list(req.query)));
 router.post("/categories", handle((req) => categories.create(req.body)));
+
+/**
+ * @openapi
+ * /api/v1/admin/search/stats:
+ *   get: { summary: "What customers searched (?days=30): totals, top searches, searches without results", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/search/test:
+ *   get: { summary: "Try a search (?q=) as customers would", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/search/synonyms:
+ *   get: { summary: "Spellings that mean the same", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   post: { summary: "New group: { phrases: [walking pad, walkpad] }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/search/synonyms/{id}:
+ *   put: { summary: "Change a group: { phrases }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   delete: { summary: "Delete a group", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/search/popular:
+ *   get: { summary: "Pinned / hidden popular searches and the list shown now", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   put: { summary: "Set { pinned, hidden }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ */
+router.get("/search/stats", handle((req) => search.stats(req.query)));
+router.get("/search/test", handle((req) => search.test(req.query.q)));
+router.get("/search/synonyms", handle(() => search.synonyms()));
+router.post("/search/synonyms", handle((req) => search.createSynonym(req.body)));
+router.put("/search/synonyms/:id", handle((req) => search.updateSynonym(req.params.id, req.body)));
+router.delete("/search/synonyms/:id", handle((req) => search.deleteSynonym(req.params.id)));
+router.get("/search/popular", handle(() => search.popular()));
+router.put("/search/popular", handle((req) => search.updatePopular(req.body)));
 
 /**
  * @openapi

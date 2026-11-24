@@ -118,6 +118,10 @@ test("search API and suggestions use the same search", async () => {
   const lean = (value) => ({ lean: async () => value });
   Product.find = (filter) => (filter?._id?.$in ? lean(catalogue.filter((p) => filter._id.$in.includes(p._id))) : lean(catalogue.filter((p) => p.sellingPrice || true)));
   Category.find = () => lean([...categoryNames].map(([slug, name]) => ({ slug, name })));
+  // no spelling groups, no views / orders yet, searches not saved
+  require("../src/models/SearchSynonym").find = () => lean([]);
+  for (const model of ["Order", "Enquiry", "PageView"]) require(`../src/models/${model}`).aggregate = async () => [];
+  require("../src/models/SearchLog").create = async () => ({});
 
   const result = await searchService.searchProducts({ q: "aerofit traedmill under 1 lakh", limit: "12" });
   assert.deepEqual(result.products.map((p) => p.name), ["Aerofit AF-409 Home Fitness Treadmill"]);

@@ -1,6 +1,7 @@
 const Product = require("../models/Product");
 const Category = require("../models/Category");
-const { termsOf, parseQuery, wordMatch } = require("../utils/searchText");
+const { termsOf, parseQuery, wordMatch, prepareGroups, groupTermsOf } = require("../utils/searchText");
+const SearchSynonym = require("../models/SearchSynonym");
 const { brandList, facetsOf, priceOf } = require("../utils/productFacets");
 
 /**
@@ -20,37 +21,59 @@ const { brandList, facetsOf, priceOf } = require("../utils/productFacets");
 const REFRESH_MS = 5 * 60 * 1000;
 
 // How much a match in each part of the product counts.
-const FIELD_WEIGHT = { name: 3, sku: 3, brand: 3, category: 2, keywords: 1 };
+// Description and feature lines count little: they only add matches that
+// rank below products whose name / category say it.
+const FIELD_WEIGHT = { name: 3, sku: 3, brand: 3, category: 2, keywords: 1, details: 0.5 };
 
 const INDEX_FIELDS = {
   name: 1, slug: 1, sku: 1, brand: 1, brandSlug: 1, thumbnail: 1, sellingPrice: 1, mrp: 1,
   discountPercent: 1, department: 1, parentCategory: 1, childCategory: 1, categoryPath: 1,
   searchKeywords: 1, isFeatured: 1, isBestSeller: 1, displayOrder: 1, createdAt: 1,
+  descriptionText: 1, features: 1,
 };
 
 /** One product as the search sees it. */
-function indexProduct(product, categoryNames = new Map()) {
-  const fields = {
-    name: termsOf(product.name),
-    sku: termsOf(product.sku),
-    brand: termsOf(product.brand),
-    category: (product.categoryPath || []).flatMap((slug) => termsOf(categoryNames.get(slug) || slug.replace(/-/g, " "))),
-    keywords: (product.searchKeywords || []).flatMap(termsOf),
+function indexProduct(product, categoryNames = new Map(), groups = [], popularity = 0) {
+  const categoryText = (product.categoryPath || []).map((slug) => categoryNames.get(slug) || slug.replace(/-/g, " "));
+  const detailsText = [product.descriptionText || "", ...(product.features || [])].join(" ").slice(0, 4000);
+  const texts = {
+    name: [product.name],
+    sku: [product.sku],
+    brand: [product.brand],
+    category: categoryText,
+    keywords: product.searchKeywords || [],
+    details: [detailsText],
   };
-  // Each word → its best field weight.
+  // Each word → its best field weight (and the admin's spelling groups it contains).
   const terms = new Map();
-  for (const [field, words] of Object.entries(fields)) {
-    for (const word of words) terms.set(word, Math.max(terms.get(word) || 0, FIELD_WEIGHT[field]));
+  for (const [field, list] of Object.entries(texts)) {
+    for (const text of list) {
+      for (const word of [...termsOf(text), ...groupTermsOf(text, groups)]) {
+        terms.set(word, Math.max(terms.get(word) || 0, FIELD_WEIGHT[field]));
+      }
+    }
   }
-  return { product, terms, nameText: termsOf(product.name).join(" ") };
+  return { product, terms, nameText: termsOf(product.name).join(" "), popularity };
 }
 
-/** All products → a searchable list, plus every word we know (for typo matching). */
-function buildIndex(products, categoryNames = new Map()) {
-  const items = products.map((product) => indexProduct(product, categoryNames));
-  const vocabulary = new Map(); // word → how many products have it
-  for (const item of items) for (const word of item.terms.keys()) vocabulary.set(word, (vocabulary.get(word) || 0) + 1);
-  return { items, vocabulary, builtAt: Date.now() };
+/**
+ * All products → a searchable list, plus every word we know (for typo matching).
+ * groups: the admin's spellings; popularity: Map slug → score (views, orders, enquiries).
+ */
+function buildIndex(products, categoryNames = new Map(), { groups = [], popularity = new Map() } = {}) {
+  const prepared = prepareGroups(groups);
+  const items = products.map((product) => indexProduct(product, categoryNames, prepared, popularity.get(product.slug) || 0));
+  // word → how many products have it; typoWords: only words from names, brands,
+  // categories and keywords (a typo is never "corrected" to a description word)
+  const vocabulary = new Map();
+  const typoWords = new Set();
+  for (const item of items) {
+    for (const [word, weight] of item.terms) {
+      vocabulary.set(word, (vocabulary.get(word) || 0) + 1);
+      if (weight >= 1 && !word.startsWith("syn:")) typoWords.add(word);
+    }
+  }
+  return { items, vocabulary, typoWords, groups: prepared, builtAt: Date.now() };
 }
 
 /**
@@ -58,11 +81,17 @@ function buildIndex(products, categoryNames = new Map()) {
  * Typos are only used when the word has no exact / starts-with match, so
  * "glove" never also matches "globe".
  */
-function expandWords(words, vocabulary) {
+function expandWords(words, vocabulary, typoWords = null) {
   return words.map((forms) => {
     const matches = new Map();
+    // A spelling group's word matches only itself.
+    if (forms.length === 1 && forms[0].startsWith("syn:")) {
+      if (vocabulary.has(forms[0])) matches.set(forms[0], 3);
+      return { forms, matches, correction: null };
+    }
     let corrected = null;
     for (const [term, count] of vocabulary) {
+      if (typoWords && !typoWords.has(term) && wordMatch(forms[0], term) === 1) continue;
       let best = 0;
       for (const form of forms) best = Math.max(best, wordMatch(form, term));
       if (best >= 1.5) matches.set(term, best);
@@ -71,6 +100,7 @@ function expandWords(words, vocabulary) {
     if (!matches.size) {
       // Nothing as typed: allow typos (all of them, best known word as the suggestion).
       for (const [term] of vocabulary) {
+        if (typoWords && !typoWords.has(term)) continue;
         let best = 0;
         for (const form of forms) best = Math.max(best, wordMatch(form, term));
         if (best === 1) matches.set(term, best);
@@ -82,13 +112,14 @@ function expandWords(words, vocabulary) {
 }
 
 const sorters = {
-  relevance: (a, b) => b.score - a.score || (b.product.isBestSeller === true) - (a.product.isBestSeller === true),
+  // score includes a small boost for products customers view, order and ask about
+  relevance: (a, b) => b.score - a.score || b.popularity - a.popularity || (b.product.isBestSeller === true) - (a.product.isBestSeller === true),
   price_low_high: (a, b) => (a.product.sellingPrice || Infinity) - (b.product.sellingPrice || Infinity),
   price_high_low: (a, b) => (b.product.sellingPrice || 0) - (a.product.sellingPrice || 0),
   discount: (a, b) => (b.product.discountPercent || 0) - (a.product.discountPercent || 0),
   newest: (a, b) => new Date(b.product.createdAt || 0) - new Date(a.product.createdAt || 0),
   featured: (a, b) => (b.product.isFeatured === true) - (a.product.isFeatured === true) || (a.product.displayOrder || 0) - (b.product.displayOrder || 0),
-  popular: (a, b) => (b.product.isBestSeller === true) - (a.product.isBestSeller === true) || b.score - a.score,
+  popular: (a, b) => b.popularity - a.popularity || (b.product.isBestSeller === true) - (a.product.isBestSeller === true) || b.score - a.score,
 };
 
 /**
@@ -99,7 +130,7 @@ const sorters = {
  *   for the filter panel (see productFacets.js).
  */
 function searchIndex(index, query, filters = {}) {
-  const parsed = parseQuery(query);
+  const parsed = parseQuery(query, index.groups || []);
   const minPrice = priceOf(filters.minPrice) ?? parsed.minPrice;
   const maxPrice = priceOf(filters.maxPrice) ?? parsed.maxPrice;
   const priced = minPrice !== undefined || maxPrice !== undefined;
@@ -127,14 +158,14 @@ function searchIndex(index, query, filters = {}) {
     return { results: matched.filter(chosen), facets, minPrice, maxPrice, ...extra };
   };
 
-  const words = expandWords(parsed.words, index.vocabulary);
+  const words = expandWords(parsed.words, index.vocabulary, index.typoWords);
   const corrections = words
     .filter((w) => w.correction && w.correction !== w.forms[0])
     .map((w) => ({ from: w.forms[0], to: w.correction }));
 
   // Nothing to match on (e.g. only "under 50000"): every candidate, by price.
   if (!words.length) {
-    const results = candidates.map(({ product }) => ({ product, score: 0 }));
+    const results = candidates.map(({ product, popularity }) => ({ product, score: 0, popularity }));
     results.sort(sorters[filters.sort] || (priced ? sorters.price_low_high : sorters.featured));
     return finish(results, { words: [], corrections, relaxed: false });
   }
@@ -146,16 +177,20 @@ function searchIndex(index, query, filters = {}) {
     let matched = 0;
     for (const word of words) {
       let best = 0;
-      for (const [term, weight] of item.terms) {
-        const quality = word.matches.get(term);
-        if (quality) best = Math.max(best, quality * weight);
+      // the word's few matching catalogue words, looked up in this product
+      for (const [term, quality] of word.matches) {
+        const weight = item.terms.get(term);
+        if (weight) best = Math.max(best, quality * weight);
       }
       if (best) matched++;
       score += best;
     }
     if (!matched) continue;
     if (item.nameText.includes(phrase)) score += 5; // the words together, in order, in the name
-    scored.push({ product: item.product, score, matched });
+    // Popular products (views, orders, enquiries) rise a little among equal matches:
+    // at most +1, less than one word matching better.
+    score += Math.min(1, Math.log10(1 + item.popularity) / 2);
+    scored.push({ product: item.product, score, matched, popularity: item.popularity });
   }
 
   // Every word must match; else the closest matches (at least half the words)
@@ -180,11 +215,17 @@ let current = null;
 let loading = null;
 
 async function loadIndex() {
-  const [products, categories] = await Promise.all([
+  // required here: homeSectionsService loads the models this file is loaded with
+  const { popularity } = require("./homeSectionsService");
+  const [products, categories, groups, scores] = await Promise.all([
     Product.find({ visibility: "published", isActive: true }, INDEX_FIELDS).lean(),
     Category.find({}, { slug: 1, name: 1 }).lean(),
+    SearchSynonym.find({}).lean(),
+    popularity().catch(() => ({ bestseller: new Map(), trending: new Map() })),
   ]);
-  return buildIndex(products, new Map(categories.map((c) => [c.slug, c.name])));
+  const combined = new Map(scores.bestseller);
+  for (const [slug, n] of scores.trending) combined.set(slug, (combined.get(slug) || 0) + n);
+  return buildIndex(products, new Map(categories.map((c) => [c.slug, c.name])), { groups, popularity: combined });
 }
 
 /** The current index; rebuilt from the database when older than a few minutes. */

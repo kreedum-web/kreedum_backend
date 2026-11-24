@@ -1,5 +1,6 @@
 const Product = require('../models/Product');
 const { getIndex, searchIndex } = require('./searchIndex');
+const { recordSearch, popularSearches } = require('./searchInsights');
 const { brandList, facetsFromDb, priceCondition, priceOf } = require('../utils/productFacets');
 
 /**
@@ -30,6 +31,14 @@ class SearchService {
       const docs = await Product.find({ _id: { $in: pageIds } }).lean();
       const byId = new Map(docs.map((d) => [String(d._id), d]));
       const products = pageIds.map((id) => byId.get(String(id))).filter(Boolean);
+      // For the admin's Search page: new searches only, not filter changes.
+      recordSearch({
+        text,
+        results: found.results.length,
+        relaxed: found.relaxed,
+        page,
+        filtered: Boolean(brand || minPrice || maxPrice || (sort && sort !== 'relevance')),
+      });
       return this.result({
         q: text,
         filters: { brand: brandList(brand).join(',') || undefined, department, category, minPrice: found.minPrice, maxPrice: found.maxPrice },
@@ -116,18 +125,9 @@ class SearchService {
       .map(({ product }) => Object.fromEntries(PAGE_FIELDS_FOR_SUGGESTIONS.map((field) => [field, product[field]])));
   }
 
-  // Popular Search Suggestions
+  // Popular searches: the admin's pinned ones, then what customers search most
   async getPopularSearches() {
-    return [
-      'Aerofit Treadmill',
-      'Multi Gym',
-      'Exercise Bike',
-      'Commercial Treadmill',
-      'Smith Machine',
-      'Massage Chair',
-      'Dumbbells',
-      'Spin Bike',
-    ];
+    return popularSearches();
   }
 }
 
