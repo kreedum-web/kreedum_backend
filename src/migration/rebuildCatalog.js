@@ -50,6 +50,7 @@ const extractSpecifications = require("../utils/extractSpecifications");
 const { variantsFromSupplier } = require("../utils/productVariants");
 const { productImageUrls, isOwnImage, withOwnImages } = require("../utils/productImages");
 const ImageAsset = require("../models/ImageAsset");
+const { reconcileVisibility } = require("../utils/productVisibility");
 const { isHiddenBrand, applyRenameToSupplierProduct } = require("../utils/brandRules");
 const { withCategoryRules, movedCategoryPath } = require("../utils/categoryRules");
 const { withAdminCategories } = require("../utils/adminCategories");
@@ -244,17 +245,15 @@ function buildProduct(original, tree, existing, usedSlugs, issues) {
  *   - fields edited by hand (product.adminLocked: price, name, photos,
  *     on/off …) keep their current value
  */
-function keepAdminChoices(update, existing, adminHiddenBrands = new Set()) {
+function keepAdminChoices(update, existing, adminHiddenBrands = new Set(), hiddenCategories = new Set()) {
   const $set = update.$set;
   const locked = new Set(existing?.adminLocked || []);
-  // A brand chosen in the admin counts for the brand switch-off too.
-  const brandSlug = locked.has("brandSlug") && existing.brandSlug !== undefined ? existing.brandSlug : $set.brandSlug;
-  if (adminHiddenBrands.has(brandSlug)) {
-    Object.assign($set, { isActive: false, visibility: "hidden", hiddenBy: "admin-brand" });
-  }
   for (const field of locked) {
     if (existing[field] !== undefined) $set[field] = existing[field];
   }
+  // A brand switched off or a category hidden in the admin keeps the product
+  // hidden; one hidden only for them comes back once they're on again.
+  reconcileVisibility($set, { hiddenBrands: adminHiddenBrands, hiddenCategories });
   return update;
 }
 
@@ -294,6 +293,8 @@ function planRebuild({
   const { categories, problems: adminProblems } = withAdminCategories(withRules.categories, existingCategories);
   adminProblems.forEach((message) => issues.push({ code: "admin_category_problem", message }));
   const tree = new Map(categories.map((c) => [c.slug, c]));
+  // Categories hidden in the admin: their products stay off the website.
+  const hiddenCategories = new Set(categories.filter((c) => c.isActive === false).map((c) => c.slug));
   const staleCategories = existingCategories.filter((c) => !tree.has(c.slug)).map((c) => c.slug);
 
   // ---------- products
@@ -319,7 +320,7 @@ function planRebuild({
       // Brand / category chosen in the admin: build the product with them, so
       // its visibility, menu path and search words follow the admin's choice.
       const update = buildProduct(withAdminBrandAndCategory(withImages, existing, tree), tree, existing, usedSlugs, issues);
-      return { sp, existing, update: keepAdminChoices(update, existing, adminHiddenBrands) };
+      return { sp, existing, update: keepAdminChoices(update, existing, adminHiddenBrands, hiddenCategories) };
     });
 
   // Hide products gone from their supplier's feed, but only for suppliers that

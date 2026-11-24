@@ -22,7 +22,8 @@
     "db:copy-catalog": "node src/scripts/copyCatalog.js",
     "brands:logos": "node src/migration/brandLogos.js",
     "categories:apply": "node src/migration/applyCategoryRules.js",
-    "admin:make": "node src/scripts/makeAdmin.js"
+    "admin:make": "node src/scripts/makeAdmin.js",
+    "visibility:apply": "node src/migration/applyVisibility.js"
   },
   "keywords": [],
   "author": "",

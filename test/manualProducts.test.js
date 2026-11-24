@@ -7,6 +7,7 @@ const Brand = require("../src/models/Brand");
 const Category = require("../src/models/Category");
 const adminProducts = require("../src/services/admin/adminProductService");
 const { planRebuild } = require("../src/migration/rebuildCatalog");
+const { findIn } = require("./helpers/fakeQuery");
 
 const walkingPads = { slug: "walking-pads", name: "Walking Pads", level: 2, path: ["cardio", "walking-pads"] };
 const lean = (value) => ({ lean: async () => value });
@@ -36,7 +37,8 @@ function fakeDatabase(t, { brands = [], categories = [walkingPads] } = {}) {
   t.mock.method(Brand, "create", async (b) => calls.brandCreated.push(b));
   t.mock.method(Brand, "updateOne", async () => ({}));
   t.mock.method(Category, "findOne", ({ slug }) => lean(categories.find((c) => c.slug === slug) || null));
-  t.mock.method(Category, "find", () => lean(categories));
+  t.mock.method(Category, "find", findIn(categories));
+  t.mock.method(Brand, "find", findIn(brands));
   t.mock.method(Category, "updateMany", async (filter, update) => calls.categoryInc.push([filter.slug.$in, update.$inc.productCount]));
   return { products, calls };
 }

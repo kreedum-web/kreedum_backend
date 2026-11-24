@@ -3,6 +3,7 @@ const Product = require("../../models/Product");
 const HttpError = require("../../utils/httpError");
 const generateSlug = require("../../utils/generateSlug");
 const { CATEGORY_LOCKABLE } = require("../../utils/adminCategories");
+const { refreshVisibility } = require("../../utils/productVisibility");
 
 /**
  * Categories in the admin dashboard.
@@ -23,91 +24,84 @@ const cleanName = (v) => {
   return name;
 };
 
-function item(c, counts) {
+function item(c, counts, allCounts, bySlug) {
   const n = counts.get(c.slug) || { total: 0, live: 0 };
+  const path = c.path || [c.slug];
   return {
     id: String(c._id),
     name: c.name,
     slug: c.slug,
     level: c.level,
     parentSlug: c.parentSlug || null,
-    path: c.path || [c.slug],
+    path,
     displayOrder: c.displayOrder || 0,
     isActive: c.isActive !== false,
+    // A category above it is hidden, so it's off the website too.
+    hiddenByParent: path.slice(0, -1).some((slug) => bySlug.get(slug)?.isActive === false),
     addedBy: c.addedBy || "",
     fromAdmin: c.addedBy === "admin",
     adminLocked: c.adminLocked || [],
+    // With a brand / department filter: that brand's / department's products only.
     liveProducts: n.live,
     totalProducts: n.total,
+    // Every product in it, whatever the filter (a category can only be deleted when 0).
+    allProducts: allCounts.get(c.slug)?.total || 0,
   };
 }
 
+/** Products per category (each counts in its category and every category above it). */
+async function countProducts(match = {}) {
+  const counts = await Product.aggregate([
+    ...(Object.keys(match).length ? [{ $match: match }] : []),
+    { $unwind: "$categoryPath" },
+    {
+      $group: {
+        _id: "$categoryPath",
+        total: { $sum: 1 },
+        live: { $sum: { $cond: [{ $and: ["$isActive", { $eq: ["$visibility", "published"] }] }, 1, 0] } },
+      },
+    },
+  ]);
+  return new Map(counts.map((c) => [c._id, { total: c.total, live: c.live }]));
+}
+
 class AdminCategoryService {
-   /** Every category, parents before children, with filtered product counts. */
+  /**
+   * Every category, parents before children, with product counts.
+   * @param {{ brand?: string, department?: string }} filters count only that brand's / department's products
+   */
   async list({ brand = "", department = "" } = {}) {
-    const productMatch = {};
+    const match = {};
+    if (brand) match.brandSlug = String(brand);
+    if (department) match.department = String(department);
+    const filtered = Object.keys(match).length > 0;
 
-    if (brand) productMatch.brandSlug = String(brand);
-    if (department) productMatch.department = String(department);
-
-    const [categories, counts] = await Promise.all([
+    const [categories, allCounts, filteredCounts] = await Promise.all([
       Category.find({}).lean(),
-      Product.aggregate([
-        ...(Object.keys(productMatch).length
-          ? [{ $match: productMatch }]
-          : []),
-        { $unwind: "$categoryPath" },
-        {
-          $group: {
-            _id: "$categoryPath",
-            total: { $sum: 1 },
-            live: {
-              $sum: {
-                $cond: [
-                  {
-                    $and: [
-                      "$isActive",
-                      { $eq: ["$visibility", "published"] },
-                    ],
-                  },
-                  1,
-                  0,
-                ],
-              },
-            },
-          },
-        },
-      ]),
+      countProducts(),
+      filtered ? countProducts(match) : null,
     ]);
-
-    const byId = new Map(
-      counts.map((c) => [c._id, { total: c.total, live: c.live }])
-    );
-
+    const counts = filteredCounts || allCounts;
     const bySlug = new Map(categories.map((c) => [c.slug, c]));
 
+    // Sort by the menu: parent's order first, then the child's.
     const key = (c) =>
       (c.path || [c.slug]).map((slug) => {
         const node = bySlug.get(slug);
         return `${String(node?.displayOrder ?? 0).padStart(4, "0")}:${node?.name || slug}`;
       });
-
     const sorted = [...categories].sort((a, b) => {
       const ka = key(a);
       const kb = key(b);
-
       for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
         if (ka[i] === undefined) return -1;
         if (kb[i] === undefined) return 1;
-
         const cmp = ka[i].localeCompare(kb[i]);
         if (cmp) return cmp;
       }
-
       return 0;
     });
-
-    return sorted.map((c) => item(c, byId));
+    return sorted.map((c) => item(c, counts, allCounts, bySlug));
   }
 
   async #findOrFail(slug) {
@@ -182,11 +176,16 @@ class AdminCategoryService {
         changed.push("isActive");
       }
     }
+    let products = { hidden: 0, shown: 0 };
     if (changed.length) {
       category.adminLocked = [...new Set([...(category.adminLocked || []), ...changed.filter((f) => CATEGORY_LOCKABLE.includes(f))])];
       await category.save();
+      // Hidden category: its products (and its sub-categories' products) go off
+      // the website too. Shown again: they come back, except those switched off
+      // on their own page or whose brand is off.
+      if (changed.includes("isActive")) products = await refreshVisibility({ categoryPath: slug });
     }
-    return (await this.list()).find((c) => c.slug === slug);
+    return { ...(await this.list()).find((c) => c.slug === slug), productsHidden: products.hidden, productsShown: products.shown };
   }
 
   /** Only admin-made categories, empty and without sub-categories. */

@@ -9,6 +9,7 @@ const adminProducts = require("../src/services/admin/adminProductService");
 const adminCategories = require("../src/services/admin/adminCategoryService");
 const { withAdminCategories } = require("../src/utils/adminCategories");
 const { planRebuild } = require("../src/migration/rebuildCatalog");
+const { findIn } = require("./helpers/fakeQuery");
 
 const tree = [
   { slug: "cardio", name: "Cardio", level: 1, path: ["cardio"], displayOrder: 0, isActive: true },
@@ -111,7 +112,8 @@ function mockDb(t, product, { categories = [], brands = [] } = {}) {
   });
   const leanOf = (v) => ({ lean: async () => v });
   t.mock.method(Category, "findOne", (q) => leanOf(categories.find((c) => c.slug === q.slug) || null));
-  t.mock.method(Category, "find", () => leanOf(categories));
+  t.mock.method(Category, "find", findIn(categories));
+  t.mock.method(Brand, "find", findIn(brands));
   t.mock.method(Brand, "findOne", (q) => leanOf(brands.find((b) => b.slug === q.slug) || null));
   const created = [];
   t.mock.method(Brand, "create", async (doc) => created.push(doc));
@@ -189,8 +191,10 @@ test("categories: edits are locked; only empty admin categories can be deleted",
   const mine = { _id: "c2", slug: "yoga-studio", name: "Yoga Studio", addedBy: "admin", adminLocked: [], save: async () => {} };
   const docs = [cardio, mine];
   t.mock.method(Category, "findOne", async (q) => docs.find((c) => c.slug === q.slug) || null);
-  t.mock.method(Category, "find", () => ({ lean: async () => docs }));
+  t.mock.method(Category, "find", findIn(docs));
+  t.mock.method(Brand, "find", findIn([]));
   t.mock.method(Product, "aggregate", async () => []);
+  t.mock.method(Product, "find", findIn([]));
 
   await adminCategories.update("cardio", { name: "Cardio Machines", isActive: false });
   assert.deepEqual(cardio.adminLocked.sort(), ["isActive", "name"]);

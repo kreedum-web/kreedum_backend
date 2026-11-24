@@ -9,6 +9,8 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 const User = require("../src/models/User");
 const Order = require("../src/models/Order");
 const Product = require("../src/models/Product");
+const Brand = require("../src/models/Brand");
+const Category = require("../src/models/Category");
 
 const ADMIN = { _id: "64b0000000000000000000a1", email: "owner@kreedum.com", role: "admin", isActive: true, firstName: "Owner" };
 const CUSTOMER = { _id: "64b0000000000000000000c1", email: "asha@gmail.com", role: "customer", isActive: true };
@@ -135,6 +137,12 @@ test("new-order feed and mark-all-seen never include unpaid online checkouts", a
 
 // ------------------------------------------------------------------ products
 
+/** No brand switched off, no category hidden (for product edits). */
+function noHiddenBrandsOrCategories(t) {
+  t.mock.method(Brand, "find", () => ({ lean: async () => [] }));
+  t.mock.method(Category, "find", () => ({ lean: async () => [] }));
+}
+
 function fakeProduct(fields) {
   const product = {
     _id: "64b0000000000000000000b1", name: "Yoga Mat", slug: "yoga-mat", sellingPrice: 1000, mrp: 1500,
@@ -147,6 +155,7 @@ function fakeProduct(fields) {
 }
 
 test("product edit: price change recalculates discount and locks the fields for the rebuild", async (t) => {
+  noHiddenBrandsOrCategories(t);
   const product = fakeProduct();
   t.mock.method(Product, "findById", (id) => {
     const result = Promise.resolve(product);
@@ -174,6 +183,7 @@ test("product edit: price change recalculates discount and locks the fields for 
 });
 
 test("product edit: option prices set the product's from-price and range", async (t) => {
+  noHiddenBrandsOrCategories(t);
   const product = fakeProduct({
     variants: [
       { variantId: "v1", label: "5 kg", sellingPrice: 900, mrp: 1000, inStock: true },

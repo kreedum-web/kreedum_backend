@@ -4,11 +4,11 @@ const Product = require("../../models/Product");
 const Brand = require("../../models/Brand");
 const Category = require("../../models/Category");
 const generateSlug = require("../../utils/generateSlug");
-const { isHiddenBrand } = require("../../utils/brandRules");
 const { searchKeywordsFor } = require("../../utils/searchKeywords");
 const HttpError = require("../../utils/httpError");
 const { uploadImage } = require("../../utils/cloudinaryFolders");
 const extractSpecifications = require("../../utils/extractSpecifications");
+const { reconcileVisibility, refreshVisibility, visibilityContext } = require("../../utils/productVisibility");
 
 /**
  * Products and brands in the admin dashboard.
@@ -279,18 +279,6 @@ class AdminProductService {
         product.brandSlug = slug;
         changed.add("brand").add("brandSlug");
         if (!known) await Brand.create({ name: brandName, slug, isActive: true, productCount: 0 }).catch(() => {});
-        // Brand switched off (admin) or not sold (brandRules.js): the product follows.
-        if (known?.adminHidden) {
-          Object.assign(product, { isActive: false, visibility: "hidden", hiddenBy: "admin-brand" });
-          ["isActive", "visibility", "hiddenBy"].forEach((f) => changed.add(f));
-        } else if (isHiddenBrand(slug)) {
-          Object.assign(product, { isActive: false, visibility: "hidden", hiddenBy: "brand-rule" });
-          ["isActive", "visibility", "hiddenBy"].forEach((f) => changed.add(f));
-        } else if (["admin-brand", "brand-rule"].includes(product.hiddenBy)) {
-          // It was hidden only because of its old brand.
-          Object.assign(product, { isActive: true, visibility: "published", hiddenBy: "" });
-          ["isActive", "visibility", "hiddenBy"].forEach((f) => changed.add(f));
-        }
       }
     }
 
@@ -306,6 +294,12 @@ class AdminProductService {
         product.childCategory = path[2] || "";
         ["categoryPath", "department", "parentCategory", "childCategory"].forEach((f) => changed.add(f));
       }
+    }
+
+    // A hidden brand or category keeps the product hidden (even if switched on
+    // here); one hidden only because of its old brand / category comes back.
+    if (reconcileVisibility(product, await visibilityContext())) {
+      ["isActive", "visibility", "hiddenBy"].forEach((f) => changed.add(f));
     }
 
     if (["brand", "categoryPath", "name", "sku"].some((f) => changed.has(f))) {
@@ -506,19 +500,11 @@ class AdminProductService {
       const live = Boolean(body.live);
       brand.adminHidden = !live;
       brand.isActive = live;
-      if (live) {
-        await Product.updateMany(
-          { brandSlug: slug, hiddenBy: "admin-brand" },
-          { $set: { isActive: true, visibility: "published", hiddenBy: "" } }
-        );
-        brand.productCount = await Product.countDocuments({ brandSlug: slug, isActive: true, visibility: "published" });
-      } else {
-        await Product.updateMany(
-          { brandSlug: slug, isActive: true, visibility: "published" },
-          { $set: { isActive: false, visibility: "hidden", hiddenBy: "admin-brand" } }
-        );
-        brand.productCount = 0;
-      }
+      await brand.save();
+      // Its products follow (except those switched off on their own page, or
+      // in a hidden category); product counts are worked out again.
+      await refreshVisibility({ brandSlug: slug });
+      return (await this.listBrands()).find((b) => b.slug === slug);
     }
 
     await brand.save();

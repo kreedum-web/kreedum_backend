@@ -52,6 +52,9 @@ class CategoryService {
     const category = await Category.findOne({ slug }).lean();
 
     if (!category) return null;
+    // Hidden in the admin (it, or a category above it): not on the website.
+    const path = category.path?.length ? category.path : [category.slug];
+    if (await Category.exists({ slug: { $in: path }, isActive: false })) return null;
 
     const breadcrumb = [];
 
