@@ -2,6 +2,7 @@ const Product = require("../models/Product");
 const asyncHandler = require("../middleware/asyncHandler");
 const buildProductQuery = require("../utils/productQueryBuilder");
 const { brandList, facetsFromDb, priceOf } = require("../utils/productFacets");
+const { relatedProducts } = require("../utils/relatedProducts");
 
 exports.getProducts = asyncHandler(async (req, res) => {
   let { page = 1, limit = 20 } = req.query;
@@ -107,28 +108,11 @@ exports.getProductBySlug = asyncHandler(async (req, res) => {
     });
   }
 
-  // Related products from same child category
-  const relatedProducts = await Product.find({
-    childCategory: product.childCategory,
-    slug: { $ne: product.slug },
-    visibility: "published",
-    isActive: true,
-  })
-    .limit(8)
-    .select([
-      "name",
-      "slug",
-      "thumbnail",
-      "sellingPrice",
-      "mrp",
-      "discountPercent",
-      "brand",
-      "badge",
-    ]);
-
+  // Related: same category, one per product family, nearest price first
+  const related = await relatedProducts(product);
   res.status(200).json({
     success: true,
     product,
-    relatedProducts,
+    relatedProducts: related,
   });
 });

@@ -333,6 +333,14 @@ const productSchema = new mongoose.Schema(
       default: false,
     },
 
+    // In stock at Kreedum's own store: can be delivered (or picked up) fastest.
+    // Set in the admin; the catalogue sync never changes it.
+    readyStock: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
     badge: {
       type: String,
       enum: ["", "Best Seller", "New Arrival", "Trending", "Hot Deal"],

@@ -2,6 +2,7 @@ const Product = require("../models/Product");
 const Category = require("../models/Category");
 const Brand = require("../models/Brand");
 const siteContentService = require("./siteContentService");
+const { homeSections } = require("./homeSectionsService");
 
 class HomepageService {
 
@@ -18,7 +19,8 @@ class HomepageService {
   // ----------------------------
   async getCategories(limit = 8) {
     const categories = await Category.aggregate([
-      { $match: { level: 1 } },
+      // Departments hidden in the admin are not shown.
+      { $match: { level: 1, isActive: { $ne: false } } },
       {
   $lookup: {
     from: "products",
@@ -58,121 +60,24 @@ class HomepageService {
   return categories;
 }
   // ----------------------------
-  // Featured Products
+  // Product rows: set up in the admin (Homepage page), see homeSectionsService
   // ----------------------------
+  async getSections() {
+    return homeSections();
+  }
+
+  /** One built-in row's products ([] when that row is hidden or empty). */
+  async rowProducts(key, limit) {
+    const row = (await homeSections()).find((s) => s.key === key);
+    return (row?.products || []).slice(0, limit);
+  }
+
   async getFeaturedProducts(limit = 8) {
-    let products = await Product.find({
-      isFeatured: true,
-      visibility: "published",
-      isActive: true,
-    })
-      .sort({ displayOrder: 1, createdAt: -1 })
-      .limit(limit)
-      .lean();
-
-    // Fallback
-    if (!products.length) {
-      products = await Product.find({
-        visibility: "published",
-        isActive: true,
-      })
-        .sort({ discountPercent: -1 })
-        .limit(limit)
-        .lean();
-    }
-
-    return products;
+    return this.rowProducts("featured", limit);
   }
 
-  // ----------------------------
-  // Best Sellers
-  // ----------------------------
-  async getBestSellers(limit = 8) {
-    let products = await Product.find({
-      isBestSeller: true,
-      visibility: "published",
-      isActive: true,
-    })
-      .sort({ displayOrder: 1, createdAt: -1 })
-      .limit(limit)
-      .lean();
-
-    if (!products.length) {
-      products = await Product.find({
-        visibility: "published",
-        isActive: true,
-      })
-        .sort({ createdAt: -1 })
-        .limit(limit)
-        .lean();
-    }
-
-    return products;
-  }
-
-  // ----------------------------
-  // New Arrivals
-  // ----------------------------
-  async getNewArrivals(limit = 8) {
-    let products = await Product.find({
-      isNewArrival: true,
-      visibility: "published",
-      isActive: true,
-    })
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
-
-    if (!products.length) {
-      products = await Product.find({
-        visibility: "published",
-        isActive: true,
-      })
-        .sort({ lastSyncedAt: -1 })
-        .limit(limit)
-        .lean();
-    }
-
-    return products;
-  }
-
-  // ----------------------------
-  // Trending Products
-  // ----------------------------
-  async getTrendingProducts(limit = 8) {
-    let products = await Product.find({
-      isTrending: true,
-      visibility: "published",
-      isActive: true,
-    })
-      .sort({ displayOrder: 1, createdAt: -1 })
-      .limit(limit)
-      .lean();
-
-    if (!products.length) {
-      products = await Product.find({
-        visibility: "published",
-        isActive: true,
-      })
-        .sort({ discountPercent: -1, createdAt: -1 })
-        .limit(limit)
-        .lean();
-    }
-
-    return products;
-  }
-
-  // ----------------------------
-  // Today's Deals
-  // ----------------------------
   async getDeals(limit = 8) {
-    return Product.find({
-      visibility: "published",
-      isActive: true,
-    })
-      .sort({ discountPercent: -1 })
-      .limit(limit)
-      .lean();
+    return this.rowProducts("deals", limit);
   }
 
   // ----------------------------
@@ -184,8 +89,9 @@ class HomepageService {
       {
         $lookup: {
           from: "products",
-          localField: "name",
-          foreignField: "brand",
+          // by slug: a brand renamed in the admin still finds its products
+          localField: "slug",
+          foreignField: "brandSlug",
           as: "products",
         },
       },
@@ -241,36 +147,26 @@ class HomepageService {
   // Homepage Payload
   // ----------------------------
   async getHomepageData() {
-    const [
-      heroBanners,
-      categories,
-      featuredProducts,
-      bestSellers,
-      newArrivals,
-      trendingProducts,
-      deals,
-      popularBrands,
-      stats,
-    ] = await Promise.all([
+    const [heroBanners, categories, sections, popularBrands, stats] = await Promise.all([
       this.getHeroBanners(),
       this.getCategories(),
-      this.getFeaturedProducts(),
-      this.getBestSellers(),
-      this.getNewArrivals(),
-      this.getTrendingProducts(),
-      this.getDeals(),
+      this.getSections(),
       this.getPopularBrands(),
       this.getHomepageStats(),
     ]);
+    const row = (key) => sections.find((s) => s.key === key)?.products || [];
 
     return {
       heroBanners,
       categories,
-      featuredProducts,
-      bestSellers,
-      newArrivals,
-      trendingProducts,
-      deals,
+      // The product rows, in the order set in the admin.
+      sections,
+      // The same built-in rows by name (for older versions of the website).
+      featuredProducts: row("featured"),
+      bestSellers: row("bestsellers"),
+      newArrivals: row("new-arrivals"),
+      trendingProducts: row("trending"),
+      deals: row("deals"),
       popularBrands,
       stats,
     };

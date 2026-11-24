@@ -9,6 +9,7 @@ const HttpError = require("../../utils/httpError");
 const { uploadImage } = require("../../utils/cloudinaryFolders");
 const extractSpecifications = require("../../utils/extractSpecifications");
 const { reconcileVisibility, recountProducts, refreshVisibility, visibilityContext } = require("../../utils/productVisibility");
+const { clearCache: clearHomeCache } = require("../homeSectionsService");
 
 /**
  * Products and brands in the admin dashboard.
@@ -45,6 +46,7 @@ const EDITABLE = {
   isBestSeller: Boolean,
   isNewArrival: Boolean,
   isTrending: Boolean,
+  readyStock: Boolean, // in our store: fastest delivery (home page "Ready Stock" row)
   badge: (v) => oneOf(v, ["", "Best Seller", "New Arrival", "Trending", "Hot Deal"], "badge"),
   displayOrder: (v) => Number(v) || 0,
 };
@@ -134,6 +136,7 @@ function listItem(p) {
     live: isLive(p),
     adminLocked: p.adminLocked || [],
     manual: isManual(p),
+    readyStock: Boolean(p.readyStock),
   };
 }
 
@@ -174,8 +177,16 @@ async function updateCounts(before, after) {
 }
 
 /** The Products page filters as a MongoDB query (list and bulk actions). */
-const FILTER_KEYS = ["q", "brand", "department", "category", "state", "stock"];
-function productFilter({ q = "", brand = "", department = "", category = "", state = "", stock = "" } = {}) {
+const FILTER_KEYS = ["q", "brand", "department", "category", "state", "stock", "highlight"];
+// ?highlight= : products ticked for a home page row
+const HIGHLIGHTS = {
+  featured: "isFeatured",
+  bestseller: "isBestSeller",
+  new: "isNewArrival",
+  trending: "isTrending",
+  "ready-stock": "readyStock",
+};
+function productFilter({ q = "", brand = "", department = "", category = "", state = "", stock = "", highlight = "" } = {}) {
   const filter = {};
   const text = String(q || "").trim();
   if (text) {
@@ -189,6 +200,7 @@ function productFilter({ q = "", brand = "", department = "", category = "", sta
   if (state === "live") Object.assign(filter, { isActive: true, visibility: "published" });
   if (state === "hidden") filter.$and = [{ $or: [{ isActive: false }, { visibility: { $ne: "published" } }] }];
   if (state === "locked") filter["adminLocked.0"] = { $exists: true };
+  if (HIGHLIGHTS[highlight]) filter[HIGHLIGHTS[highlight]] = true;
   return filter;
 }
 
@@ -228,6 +240,27 @@ class AdminProductService {
    * @param {{ filters: object, live: boolean, dryRun?: boolean }} body
    * dryRun: only count what would change (for the confirm box).
    */
+  /**
+   * Mark (or unmark) every product matching the filters as ready stock.
+   * dryRun: only count.
+   */
+  async bulkSetReadyStock({ filters = {}, readyStock, dryRun = false } = {}) {
+    if (typeof readyStock !== "boolean") throw new HttpError(400, "Say whether to mark (readyStock: true) or unmark (false).");
+    if (!FILTER_KEYS.some((k) => String(filters[k] || "").trim())) {
+      throw new HttpError(400, "Choose at least one filter first (brand, category, search…), so this can't change the whole catalogue by mistake.");
+    }
+    const query = productFilter(filters);
+    const [matched, already] = await Promise.all([
+      Product.countDocuments(query),
+      Product.countDocuments({ ...query, readyStock: readyStock ? true : { $ne: true } }),
+    ]);
+    if (!dryRun && matched > already) {
+      await Product.updateMany(query, { $set: { readyStock } });
+      clearHomeCache();
+    }
+    return { matched, changed: matched - already, already, dryRun };
+  }
+
   async bulkSetLive({ filters = {}, live, dryRun = false } = {}) {
     if (typeof live !== "boolean") throw new HttpError(400, "Say whether to show (live: true) or hide (live: false).");
     if (!FILTER_KEYS.some((k) => String(filters[k] || "").trim())) {
@@ -279,6 +312,7 @@ class AdminProductService {
     if (!dryRun && writes.length) {
       await Product.bulkWrite(writes);
       await recountProducts();
+      clearHomeCache();
     }
     return { ...result, dryRun };
   }
@@ -290,6 +324,7 @@ class AdminProductService {
     return { ...listItem(product), images: product.images || [], variants: product.variants || [],
       availabilityMessage: product.availabilityMessage, isFeatured: product.isFeatured,
       isBestSeller: product.isBestSeller, isNewArrival: product.isNewArrival, isTrending: product.isTrending,
+      readyStock: Boolean(product.readyStock),
       badge: product.badge, displayOrder: product.displayOrder, visibility: product.visibility,
       isActive: product.isActive, hiddenBy: product.hiddenBy, sourceUrl: product.sourceUrl,
       categoryPath: product.categoryPath || [], brandSlug: product.brandSlug, supplier: product.supplier,
@@ -436,6 +471,7 @@ class AdminProductService {
     }
 
     await product.save();
+    clearHomeCache(); // home page rows show the change straight away
     await updateCounts(before, { path: product.categoryPath || [], brandSlug: product.brandSlug, live: isLive(product) });
     return this.get(productId);
   }
@@ -482,6 +518,7 @@ class AdminProductService {
     try {
       applyFeatures(product);
       await product.save();
+    clearHomeCache(); // home page rows show the change straight away
       // Brand, category, search words, SEO and on/off go through the normal edit.
       return await this.update(String(product._id), {
         brand: body.brand,
@@ -521,6 +558,7 @@ class AdminProductService {
     product.thumbnail = product.images[0];
     if (!isManual(product)) product.adminLocked = [...new Set([...(product.adminLocked || []), "images", "thumbnail"])];
     await product.save();
+    clearHomeCache(); // home page rows show the change straight away
     return this.get(productId);
   }
 

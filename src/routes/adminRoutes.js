@@ -9,6 +9,7 @@ const stats = require("../services/admin/adminStatsService");
 const notifications = require("../services/admin/adminNotificationService");
 const carts = require("../services/admin/adminCartService");
 const categories = require("../services/admin/adminCategoryService");
+const homeSections = require("../services/admin/adminHomeSectionService");
 
 /**
  * Admin dashboard API (admin.kreedum.com). Every route needs a signed-in
@@ -130,6 +131,7 @@ router.patch("/orders/:id/status", handle((req) => orders.updateStatus(req.param
 router.get("/products", handle((req) => products.list(req.query)));
 router.post("/products", handle((req) => products.create(req.body)));
 router.post("/products/bulk-live", handle((req) => products.bulkSetLive(req.body)));
+router.post("/products/bulk-ready-stock", handle((req) => products.bulkSetReadyStock(req.body)));
 router.get("/products/:id", handle((req) => products.get(req.params.id)));
 router.delete("/products/:id", handle((req) => products.remove(req.params.id)));
 router.patch("/products/:id", handle((req) => products.update(req.params.id, req.body)));
@@ -152,6 +154,33 @@ router.patch("/brands/:slug", handle((req) => products.updateBrand(req.params.sl
  */
 router.get("/categories", handle((req) => categories.list(req.query)));
 router.post("/categories", handle((req) => categories.create(req.body)));
+
+/**
+ * @openapi
+ * /api/v1/admin/home-sections:
+ *   get: { summary: "Home page product rows, in order", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   post: { summary: "New custom row: { title, subtitle, limit, startsAt, endsAt, autoFill, filters: { categorySlug, brandSlugs, minPrice, maxPrice, minDiscount, readyStockOnly, sort } }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/home-sections/reorder:
+ *   post: { summary: "Order of the rows: { ids: [...] } top to bottom", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/home-sections/{id}:
+ *   patch: { summary: "Change a row (title, subtitle, isVisible, limit, dates; custom: autoFill, filters)", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   delete: { summary: "Delete a custom row", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/home-sections/{id}/picks:
+ *   get: { summary: "A row's picked products, in order", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   put: { summary: "Set a row's picks: { productIds: [...] }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/home-sections/{id}/preview:
+ *   get: { summary: "What the row shows now (picks, then its rule)", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/products/bulk-ready-stock:
+ *   post: { summary: "Mark / unmark every product matching the filters as ready stock: { filters, readyStock, dryRun }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ */
+router.get("/home-sections", handle(() => homeSections.list()));
+router.post("/home-sections", handle((req) => homeSections.create(req.body)));
+router.post("/home-sections/reorder", handle((req) => homeSections.reorder(req.body?.ids)));
+router.patch("/home-sections/:id", handle((req) => homeSections.update(req.params.id, req.body)));
+router.delete("/home-sections/:id", handle((req) => homeSections.remove(req.params.id)));
+router.get("/home-sections/:id/picks", handle((req) => homeSections.picks(req.params.id)));
+router.put("/home-sections/:id/picks", handle((req) => homeSections.setPicks(req.params.id, req.body?.productIds)));
+router.get("/home-sections/:id/preview", handle((req) => homeSections.preview(req.params.id)));
 router.patch("/categories/:slug", handle((req) => categories.update(req.params.slug, req.body)));
 router.delete("/categories/:slug", handle((req) => categories.remove(req.params.slug)));
 router.post("/categories/:slug/reset", handle((req) => categories.reset(req.params.slug)));
