@@ -1,3 +1,4 @@
+const { brandList, priceCondition, priceOf } = require("./productFacets");
 /**
  * Build Mongo query and sorting from request query params.
  */
@@ -30,8 +31,9 @@ function buildProductQuery(queryParams) {
 
   if (childCategory) query.childCategory = childCategory;
 
-  // Brand Filter
-  if (brand) query.brandSlug = brand;
+  // Brand filter: one brand or several (?brand=aerofit,cockatoo)
+  const brands = brandList(brand);
+  if (brands.length) query.brandSlug = brands.length === 1 ? brands[0] : { $in: brands };
 
   // Stock Filter
   if (stockStatus) query.stockStatus = stockStatus;
@@ -45,14 +47,9 @@ function buildProductQuery(queryParams) {
 
   if (trending === "true") query.isTrending = true;
 
-  // Price Range
-  if (minPrice || maxPrice) {
-    query.sellingPrice = {};
-
-    if (minPrice) query.sellingPrice.$gte = Number(minPrice);
-
-    if (maxPrice) query.sellingPrice.$lte = Number(maxPrice);
-  }
+  // Price range (price-on-enquiry products are left out once a range is set)
+  const price = priceCondition(priceOf(minPrice), priceOf(maxPrice));
+  if (price) query.sellingPrice = price;
 
   // Sorting
   let sortOption = {

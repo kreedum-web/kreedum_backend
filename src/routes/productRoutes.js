@@ -62,9 +62,17 @@ const {
  *
  *       - in: query
  *         name: brand
+ *         description: One brand slug or several, comma-separated.
  *         schema:
  *           type: string
- *           example: aerofit
+ *           example: aerofit,cockatoo
+ *
+ *       - in: query
+ *         name: facets
+ *         description: "true = also return facets: { brands: [{ slug, name, count }], price: { min, max } } for the filter panel."
+ *         schema:
+ *           type: string
+ *           example: "true"
  *
  *       - in: query
  *         name: minPrice

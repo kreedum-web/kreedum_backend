@@ -28,8 +28,8 @@ const searchController = require("../controllers/searchController");
  *         name: brand
  *         schema:
  *           type: string
- *         description: Brand slug.
- *         example: aerofit
+ *         description: "One brand slug or several, comma-separated. The response's facets list the brands (with counts) and price range of the matches."
+ *         example: aerofit,cockatoo
  *
  *       - in: query
  *         name: department

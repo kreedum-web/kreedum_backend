@@ -1,6 +1,7 @@
 const Product = require("../models/Product");
 const asyncHandler = require("../middleware/asyncHandler");
 const buildProductQuery = require("../utils/productQueryBuilder");
+const { brandList, facetsFromDb, priceOf } = require("../utils/productFacets");
 
 exports.getProducts = asyncHandler(async (req, res) => {
   let { page = 1, limit = 20 } = req.query;
@@ -11,6 +12,17 @@ exports.getProducts = asyncHandler(async (req, res) => {
   const { query, sortOption } = buildProductQuery(req.query);
 
   const totalProducts = await Product.countDocuments(query);
+
+  // ?facets=true: the brands (with counts) and price range for the filter panel
+  let facets;
+  if (req.query.facets === "true") {
+    const { brandSlug, sellingPrice, ...base } = query;
+    facets = await facetsFromDb(base, {
+      brands: brandList(req.query.brand),
+      minPrice: priceOf(req.query.minPrice),
+      maxPrice: priceOf(req.query.maxPrice),
+    });
+  }
 
   const products = await Product.find(query)
     .sort(sortOption)
@@ -53,7 +65,7 @@ exports.getProducts = asyncHandler(async (req, res) => {
   department: req.query.department || null,
   parentCategory: req.query.parentCategory || null,
   childCategory: req.query.childCategory || null,
-  brand: req.query.brand || null,
+  brand: brandList(req.query.brand).join(",") || null,
   stockStatus: req.query.stockStatus || null,
 
   featured: req.query.featured === "true",
@@ -71,6 +83,8 @@ exports.getProducts = asyncHandler(async (req, res) => {
 
   sort: req.query.sort || "latest",
 },
+
+    ...(facets ? { facets } : {}),
 
     products,
   });

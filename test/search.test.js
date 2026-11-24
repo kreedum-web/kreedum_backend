@@ -131,3 +131,34 @@ test("search API and suggestions use the same search", async () => {
   // symbols typed by customers never break anything
   for (const typed of ["tread\\", "bench (", "a+b", "[mat", "**"]) await searchService.getSuggestions(typed);
 });
+
+test("search filters: several brands, and the filter panel's brands and price range", () => {
+  const found = searchIndex(index, "treadmill", { brand: "aerofit,powermax" });
+  assert.equal(found.results.length, 3);
+
+  const aerofitOnly = searchIndex(index, "treadmill", { brand: ["aerofit"] });
+  assert.deepEqual(aerofitOnly.results.map((r) => r.product.brandSlug), ["aerofit", "aerofit"]);
+  // Brand counts are for every brand that matched, so others can be ticked too…
+  assert.deepEqual(aerofitOnly.facets.brands.map((b) => [b.slug, b.count]), [["aerofit", 2], ["powermax", 1]]);
+  // …and the price range is for the chosen brand.
+  assert.deepEqual(aerofitOnly.facets.price, { min: 44200, max: 264400 });
+
+  const cheap = searchIndex(index, "treadmill", { maxPrice: "50000" });
+  assert.equal(cheap.results.length, 2);
+  assert.deepEqual(cheap.facets.brands.map((b) => [b.slug, b.count]), [["aerofit", 1], ["powermax", 1]], "counts follow the price range");
+  assert.deepEqual(cheap.facets.price, { min: 38900, max: 264400 }, "the slider keeps the full range");
+
+  const none = searchIndex(index, "treadmill", { brand: "usi" });
+  assert.equal(none.results.length, 0);
+  assert.deepEqual(none.facets.brands.find((b) => b.slug === "usi"), { slug: "usi", name: "usi", count: 0 }, "a chosen brand can still be unticked");
+});
+
+test("products API: several brands and a price range", () => {
+  const buildProductQuery = require("../src/utils/productQueryBuilder");
+  const { brandList } = require("../src/utils/productFacets");
+  assert.deepEqual(brandList(["aerofit,Powermax", "aerofit", " "]), ["aerofit", "powermax"]);
+  assert.deepEqual(buildProductQuery({ brand: "aerofit" }).query.brandSlug, "aerofit");
+  assert.deepEqual(buildProductQuery({ brand: "aerofit,usi" }).query.brandSlug, { $in: ["aerofit", "usi"] });
+  assert.deepEqual(buildProductQuery({ minPrice: "1000", maxPrice: "5000" }).query.sellingPrice, { $gt: 0, $gte: 1000, $lte: 5000 });
+  assert.equal(buildProductQuery({ minPrice: "" }).query.sellingPrice, undefined);
+});

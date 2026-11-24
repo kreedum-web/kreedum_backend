@@ -1,6 +1,7 @@
 const Product = require("../models/Product");
 const Category = require("../models/Category");
 const { termsOf, parseQuery, wordMatch } = require("../utils/searchText");
+const { brandList, facetsOf, priceOf } = require("../utils/productFacets");
 
 /**
  * The website's product search, kept in memory (about 1,300 products, so
@@ -92,19 +93,27 @@ const sorters = {
 
 /**
  * Search the index.
- * @param filters { brand, department, category, minPrice, maxPrice, sort }
- * @returns {{ results: {product, score}[], minPrice?, maxPrice?, words: string[], corrections: {from,to}[], relaxed: boolean }}
+ * @param filters { brand (one, "a,b" or an array), department, category, minPrice, maxPrice, sort }
+ * @returns { results, facets, minPrice, maxPrice, words, corrections, relaxed }
+ *   facets: brands (with counts) and price range of what the words matched,
+ *   for the filter panel (see productFacets.js).
  */
 function searchIndex(index, query, filters = {}) {
   const parsed = parseQuery(query);
-  const minPrice = filters.minPrice !== undefined && filters.minPrice !== "" ? Number(filters.minPrice) : parsed.minPrice;
-  const maxPrice = filters.maxPrice !== undefined && filters.maxPrice !== "" ? Number(filters.maxPrice) : parsed.maxPrice;
+  const minPrice = priceOf(filters.minPrice) ?? parsed.minPrice;
+  const maxPrice = priceOf(filters.maxPrice) ?? parsed.maxPrice;
   const priced = minPrice !== undefined || maxPrice !== undefined;
+  const brands = brandList(filters.brand);
 
+  // Department / category narrow what's searched; brand and price are
+  // applied last, so the filter panel can still offer the other options.
   const candidates = index.items.filter(({ product: p }) => {
-    if (filters.brand && p.brandSlug !== filters.brand && String(p.brand).toLowerCase() !== String(filters.brand).toLowerCase()) return false;
     if (filters.department && p.department !== filters.department) return false;
     if (filters.category && !(p.categoryPath || []).includes(filters.category) && p.parentCategory !== filters.category && p.childCategory !== filters.category) return false;
+    return true;
+  });
+  const chosen = ({ product: p }) => {
+    if (brands.length && !brands.includes(p.brandSlug) && !brands.includes(String(p.brand).toLowerCase())) return false;
     if (priced) {
       const price = Number(p.sellingPrice) || 0;
       if (!price) return false; // price on request: not in a price search
@@ -112,7 +121,11 @@ function searchIndex(index, query, filters = {}) {
       if (maxPrice !== undefined && price > maxPrice) return false;
     }
     return true;
-  });
+  };
+  const finish = (matched, extra) => {
+    const facets = facetsOf(matched.map((r) => r.product), { brands, minPrice, maxPrice });
+    return { results: matched.filter(chosen), facets, minPrice, maxPrice, ...extra };
+  };
 
   const words = expandWords(parsed.words, index.vocabulary);
   const corrections = words
@@ -123,7 +136,7 @@ function searchIndex(index, query, filters = {}) {
   if (!words.length) {
     const results = candidates.map(({ product }) => ({ product, score: 0 }));
     results.sort(sorters[filters.sort] || (priced ? sorters.price_low_high : sorters.featured));
-    return { results, minPrice, maxPrice, words: [], corrections, relaxed: false };
+    return finish(results, { words: [], corrections, relaxed: false });
   }
 
   const phrase = parsed.words.map((forms) => forms[0]).join(" ");
@@ -145,11 +158,12 @@ function searchIndex(index, query, filters = {}) {
     scored.push({ product: item.product, score, matched });
   }
 
+  // Every word must match; else the closest matches (at least half the words)
+  // among the brands / price chosen.
   let results = scored.filter((r) => r.matched === words.length);
   let relaxed = false;
-  if (!results.length && words.length > 1) {
-    // Closest matches: as many words as possible (at least half).
-    const most = Math.max(...scored.map((r) => r.matched), 0);
+  if (!results.filter(chosen).length && words.length > 1) {
+    const most = Math.max(...scored.filter(chosen).map((r) => r.matched), 0);
     if (most >= Math.ceil(words.length / 2)) {
       results = scored.filter((r) => r.matched === most);
       relaxed = true;
@@ -157,7 +171,7 @@ function searchIndex(index, query, filters = {}) {
   }
 
   results.sort(sorters[filters.sort] || sorters.relevance);
-  return { results, minPrice, maxPrice, words: parsed.words.map((forms) => forms[0]), corrections, relaxed };
+  return finish(results, { words: parsed.words.map((forms) => forms[0]), corrections, relaxed });
 }
 
 // ------------------------------------------------------------------ live index

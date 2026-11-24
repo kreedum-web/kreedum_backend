@@ -1,5 +1,6 @@
 const Product = require('../models/Product');
 const { getIndex, searchIndex } = require('./searchIndex');
+const { brandList, facetsFromDb, priceCondition, priceOf } = require('../utils/productFacets');
 
 /**
  * Text typed by a customer, safe to use inside a regular expression: symbols
@@ -31,7 +32,8 @@ class SearchService {
       const products = pageIds.map((id) => byId.get(String(id))).filter(Boolean);
       return this.result({
         q: text,
-        filters: { brand, department, category, minPrice: found.minPrice, maxPrice: found.maxPrice },
+        filters: { brand: brandList(brand).join(',') || undefined, department, category, minPrice: found.minPrice, maxPrice: found.maxPrice },
+        facets: found.facets,
         products,
         total: found.results.length,
         page,
@@ -48,19 +50,22 @@ class SearchService {
     }
 
     // ---------- no search words: filters only
-    const filter = { visibility: 'published', isActive: true };
-    if (brand) filter.$or = [{ brandSlug: brand }, { brand: new RegExp(`^${escapeRegex(brand)}$`, 'i') }];
-    if (department) filter.department = department;
+    const base = { visibility: 'published', isActive: true };
+    if (department) base.department = department;
     if (category) {
-      filter.$and = [{ $or: [{ parentCategory: category }, { childCategory: category }, { categoryPath: category }] }];
+      base.$and = [{ $or: [{ parentCategory: category }, { childCategory: category }, { categoryPath: category }] }];
     }
-    const hasMin = minPrice !== undefined && minPrice !== '';
-    const hasMax = maxPrice !== undefined && maxPrice !== '';
-    if (hasMin || hasMax) {
-      filter.sellingPrice = {};
-      if (hasMin) filter.sellingPrice.$gte = Number(minPrice);
-      if (hasMax) filter.sellingPrice.$lte = Number(maxPrice);
+    const brands = brandList(brand);
+    const range = { brands, minPrice: priceOf(minPrice), maxPrice: priceOf(maxPrice) };
+    const filter = { ...base };
+    if (brands.length === 1) {
+      // one brand: by its slug or its name (?brand=Aerofit)
+      filter.$or = [{ brandSlug: brands[0] }, { brand: new RegExp(`^${escapeRegex(brands[0])}$`, 'i') }];
+    } else if (brands.length) {
+      filter.brandSlug = { $in: brands };
     }
+    const price = priceCondition(range.minPrice, range.maxPrice);
+    if (price) filter.sellingPrice = price;
 
     const sortMap = {
       newest: { createdAt: -1 },
@@ -70,21 +75,23 @@ class SearchService {
       featured: { isFeatured: -1, displayOrder: 1 },
       popular: { isBestSeller: -1, createdAt: -1 },
     };
-    const [products, total] = await Promise.all([
+    const [products, total, facets] = await Promise.all([
       Product.find(filter)
         .sort(sortMap[sort] || { createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
       Product.countDocuments(filter),
+      facetsFromDb(base, range),
     ]);
-    return this.result({ q: '', filters: { brand, department, category, minPrice, maxPrice }, products, total, page, limit });
+    return this.result({ q: '', filters: { brand: brands.join(',') || undefined, department, category, minPrice, maxPrice }, facets, products, total, page, limit });
   }
 
-  result({ q, filters, products, total, page, limit, interpreted }) {
+  result({ q, filters, facets, products, total, page, limit, interpreted }) {
     return {
       query: q,
       filters,
+      facets,
       ...(interpreted ? { interpreted } : {}),
       products,
       pagination: {
