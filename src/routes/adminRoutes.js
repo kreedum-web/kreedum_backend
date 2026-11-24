@@ -112,6 +112,8 @@ router.patch("/orders/:id/status", handle((req) => orders.updateStatus(req.param
  * /api/v1/admin/products:
  *   get: { summary: "Products (?q=&brand=&department=&category=&state=live|hidden|locked&stock=&page=)", tags: [Admin], security: [{ bearerAuth: [] }] }
  *   post: { summary: "Add a product by hand: { name, brand, categorySlug, sellingPrice, mrp, stockStatus, sku, descriptionText, features, live }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/products/bulk-live:
+ *   post: { summary: "Show or hide every product matching the filters: { filters: { q, brand, department, category, state, stock }, live, dryRun }", tags: [Admin], security: [{ bearerAuth: [] }] }
  * /api/v1/admin/products/{id}:
  *   get: { summary: "One product", tags: [Admin], security: [{ bearerAuth: [] }] }
  *   delete: { summary: "Delete a product added by hand", tags: [Admin], security: [{ bearerAuth: [] }] }
@@ -127,6 +129,7 @@ router.patch("/orders/:id/status", handle((req) => orders.updateStatus(req.param
  */
 router.get("/products", handle((req) => products.list(req.query)));
 router.post("/products", handle((req) => products.create(req.body)));
+router.post("/products/bulk-live", handle((req) => products.bulkSetLive(req.body)));
 router.get("/products/:id", handle((req) => products.get(req.params.id)));
 router.delete("/products/:id", handle((req) => products.remove(req.params.id)));
 router.patch("/products/:id", handle((req) => products.update(req.params.id, req.body)));

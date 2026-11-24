@@ -155,3 +155,49 @@ test("website: a hidden category's page (and its sub-categories' pages) are not 
   assert.equal(await categoryService.getCategoryBySlug("cardio"), null);
   assert.equal(await categoryService.getCategoryBySlug("treadmill"), null);
 });
+
+test("bulk show / hide: every product matching the filters, like their own switches", async (t) => {
+  const products = [
+    { _id: "p1", name: "A", brandSlug: "aerofit", categoryPath: ["cardio"], adminLocked: [], ...live() },
+    { _id: "p2", name: "B", brandSlug: "aerofit", categoryPath: ["strength"], adminLocked: [], ...hidden("admin") },
+    { _id: "p3", name: "C", brandSlug: "aerofit", categoryPath: ["yoga"], adminLocked: [], ...hidden("admin") },
+    { _id: "p4", name: "D", brandSlug: "aerofit", categoryPath: ["strength"], adminLocked: [], ...hidden("") }, // gone from supplier
+    { _id: "p5", name: "E", brandSlug: "aerofit", categoryPath: ["yoga"], adminLocked: [], ...hidden("admin-category") },
+    { _id: "p6", name: "F", brandSlug: "other", categoryPath: ["cardio"], adminLocked: [], ...live() },
+    { _id: "p7", name: "G", supplier: "manual", brandSlug: "aerofit", categoryPath: ["cardio"], adminLocked: [], ...live() },
+  ];
+  const byId = new Map(products.map((p) => [p._id, p]));
+  t.mock.method(Product, "find", (query) => ({ lean: async () => products.filter((p) => matches(p, query)).map((p) => ({ ...p })) }));
+  const writes = [];
+  t.mock.method(Product, "bulkWrite", async (ops) => {
+    writes.push(...ops);
+    for (const { updateOne } of ops) {
+      const p = byId.get(updateOne.filter._id);
+      Object.assign(p, updateOne.update.$set);
+      if (updateOne.update.$addToSet) p.adminLocked = [...new Set([...p.adminLocked, ...updateOne.update.$addToSet.adminLocked.$each])];
+    }
+  });
+  t.mock.method(Product, "aggregate", async () => []);
+  t.mock.method(Category, "find", findIn([{ slug: "yoga", isActive: false }, { slug: "cardio" }, { slug: "strength" }]));
+  t.mock.method(Category, "bulkWrite", async () => ({}));
+  t.mock.method(Brand, "find", findIn([]));
+  t.mock.method(Brand, "bulkWrite", async () => ({}));
+
+  await assert.rejects(adminProducts.bulkSetLive({ filters: {}, live: false }), /at least one filter/);
+
+  const preview = await adminProducts.bulkSetLive({ filters: { brand: "aerofit" }, live: false, dryRun: true });
+  assert.deepEqual(preview, { matched: 6, changed: 2, already: 4, waiting: 0, bySync: 0, dryRun: true });
+  assert.equal(writes.length, 0, "a dry run changes nothing");
+
+  await adminProducts.bulkSetLive({ filters: { brand: "aerofit" }, live: false });
+  assert.deepEqual(state(byId.get("p1")), hidden("admin"));
+  assert.deepEqual(byId.get("p1").adminLocked, ["isActive", "visibility", "hiddenBy"], "kept by the catalogue sync");
+  assert.deepEqual(byId.get("p7").adminLocked, [], "added by hand: no locks");
+  assert.deepEqual(state(byId.get("p6")), live(), "other brand untouched");
+
+  const shown = await adminProducts.bulkSetLive({ filters: { brand: "aerofit" }, live: true });
+  assert.deepEqual(shown, { matched: 6, changed: 3, already: 0, waiting: 2, bySync: 1, dryRun: false });
+  assert.deepEqual(state(byId.get("p2")), live());
+  assert.deepEqual(state(byId.get("p3")), hidden("admin-category"), "its category is hidden: comes back with it");
+  assert.deepEqual(state(byId.get("p4")), hidden(""), "hidden by the sync: left alone");
+});

@@ -8,7 +8,7 @@ const { searchKeywordsFor } = require("../../utils/searchKeywords");
 const HttpError = require("../../utils/httpError");
 const { uploadImage } = require("../../utils/cloudinaryFolders");
 const extractSpecifications = require("../../utils/extractSpecifications");
-const { reconcileVisibility, refreshVisibility, visibilityContext } = require("../../utils/productVisibility");
+const { reconcileVisibility, recountProducts, refreshVisibility, visibilityContext } = require("../../utils/productVisibility");
 
 /**
  * Products and brands in the admin dashboard.
@@ -173,24 +173,33 @@ async function updateCounts(before, after) {
   await Promise.all(ops);
 }
 
+/** The Products page filters as a MongoDB query (list and bulk actions). */
+const FILTER_KEYS = ["q", "brand", "department", "category", "state", "stock"];
+function productFilter({ q = "", brand = "", department = "", category = "", state = "", stock = "" } = {}) {
+  const filter = {};
+  const text = String(q || "").trim();
+  if (text) {
+    const pattern = new RegExp(escapeRegex(text), "i");
+    filter.$or = [{ name: pattern }, { sku: pattern }, { brand: pattern }];
+  }
+  if (brand) filter.brandSlug = String(brand);
+  if (department) filter.department = String(department);
+  if (category) filter.categoryPath = String(category); // that category or anything inside it
+  if (stock) filter.stockStatus = String(stock);
+  if (state === "live") Object.assign(filter, { isActive: true, visibility: "published" });
+  if (state === "hidden") filter.$and = [{ $or: [{ isActive: false }, { visibility: { $ne: "published" } }] }];
+  if (state === "locked") filter["adminLocked.0"] = { $exists: true };
+  return filter;
+}
+
+const LIVE_FIELDS = ["isActive", "visibility", "hiddenBy"];
+
 class AdminProductService {
   /**
    * @param {{ q?: string, brand?: string, department?: string, category?: string, state?: "live"|"hidden"|"locked", stock?: string, page?: number }} filters
    */
-  async list({ q = "", brand = "", department = "", category = "", state = "", stock = "", page = 1, limit = 25 } = {}) {
-    const filter = {};
-    const text = String(q || "").trim();
-    if (text) {
-      const pattern = new RegExp(escapeRegex(text), "i");
-      filter.$or = [{ name: pattern }, { sku: pattern }, { brand: pattern }];
-    }
-    if (brand) filter.brandSlug = brand;
-    if (department) filter.department = department;
-    if (category) filter.categoryPath = String(category); // that category or anything inside it
-    if (stock) filter.stockStatus = stock;
-    if (state === "live") Object.assign(filter, { isActive: true, visibility: "published" });
-    if (state === "hidden") filter.$and = [{ $or: [{ isActive: false }, { visibility: { $ne: "published" } }] }];
-    if (state === "locked") filter["adminLocked.0"] = { $exists: true };
+  async list({ page = 1, limit = 25, ...filters } = {}) {
+    const filter = productFilter(filters);
 
     const size = Math.min(Math.max(Number(limit) || 25, 1), 100);
     const current = Math.max(Number(page) || 1, 1);
@@ -206,6 +215,72 @@ class AdminProductService {
       total,
       departments: departments.filter(Boolean).sort(),
     };
+  }
+
+  /**
+   * Show or hide every product matching the Products page filters (all
+   * pages), like its own On website switch would.
+   *   hide: live products are switched off by hand ("admin").
+   *   show: products switched off by hand come back; those whose category or
+   *         brand is off stay hidden until it's on again. Products the
+   *         catalogue sync hid (gone from the supplier, no category) are
+   *         left alone: open them one by one for those.
+   * @param {{ filters: object, live: boolean, dryRun?: boolean }} body
+   * dryRun: only count what would change (for the confirm box).
+   */
+  async bulkSetLive({ filters = {}, live, dryRun = false } = {}) {
+    if (typeof live !== "boolean") throw new HttpError(400, "Say whether to show (live: true) or hide (live: false).");
+    if (!FILTER_KEYS.some((k) => String(filters[k] || "").trim())) {
+      throw new HttpError(400, "Choose at least one filter first (brand, category, search…), so this can't change the whole catalogue by mistake.");
+    }
+    const products = await Product.find(productFilter(filters), {
+      supplier: 1, brandSlug: 1, categoryPath: 1, isActive: 1, visibility: 1, hiddenBy: 1, adminLocked: 1,
+    }).lean();
+    const context = live ? await visibilityContext() : null;
+
+    const result = {
+      matched: products.length,
+      changed: 0, // shown / hidden now
+      already: 0, // already shown / hidden
+      waiting: 0, // show: stays hidden until its category / brand is on (then it comes back)
+      bySync: 0, // show: hidden by the catalogue sync, left alone
+    };
+    const writes = [];
+    for (const p of products) {
+      const wasLive = isLive(p);
+      if (live === wasLive) {
+        result.already++;
+        continue;
+      }
+      const next = { isActive: p.isActive, visibility: p.visibility, hiddenBy: p.hiddenBy };
+      if (!live) {
+        Object.assign(next, { isActive: false, visibility: "hidden", hiddenBy: "admin" });
+        result.changed++;
+      } else if (p.hiddenBy === "admin") {
+        // On, unless its category / brand is off: then hidden for that reason.
+        const after = { ...p, isActive: true, visibility: "published", hiddenBy: "" };
+        reconcileVisibility(after, context);
+        Object.assign(next, { isActive: after.isActive, visibility: after.visibility, hiddenBy: after.hiddenBy });
+        if (isLive(next)) result.changed++;
+        else result.waiting++;
+      } else if (["admin-category", "admin-brand", "brand-rule"].includes(p.hiddenBy)) {
+        result.waiting++; // nothing to do: it follows its category / brand
+        continue;
+      } else {
+        result.bySync++;
+        continue;
+      }
+      const update = { $set: next };
+      // Kept as set here when the catalogue syncs (products added by hand have no supplier values).
+      if (!isManual(p)) update.$addToSet = { adminLocked: { $each: LIVE_FIELDS } };
+      writes.push({ updateOne: { filter: { _id: p._id }, update } });
+    }
+
+    if (!dryRun && writes.length) {
+      await Product.bulkWrite(writes);
+      await recountProducts();
+    }
+    return { ...result, dryRun };
   }
 
   async get(productId) {
