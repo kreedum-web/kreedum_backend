@@ -86,6 +86,20 @@ router.delete("/:productId", authMiddleware, wishlistController.removeFromWishli
  *       200:
  *         description: Wishlist status returned.
  */
+/**
+ * @swagger
+ * /api/v1/wishlist/ids:
+ *   get:
+ *     summary: Ids of all products in my wishlist (to mark product cards in one request)
+ *     tags: [Wishlist]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "{ productIds: [...] }"
+ */
+router.get("/ids", authMiddleware, wishlistController.wishlistIds);
+
 router.get(
   "/check/:productId",
   authMiddleware,

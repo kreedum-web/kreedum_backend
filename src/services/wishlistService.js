@@ -78,6 +78,15 @@ class WishlistService {
   // ----------------------------
   // Check Wishlist Status
   // ----------------------------
+  /**
+   * Ids of every product in the customer's wishlist: one request lets the
+   * website mark all product cards (instead of one request per card).
+   */
+  async wishlistIds(userId) {
+    const items = await Wishlist.find({ user: userId }, { product: 1, _id: 0 }).lean();
+    return { productIds: items.map((item) => String(item.product)) };
+  }
+
   async checkWishlist(userId, productId) {
     const exists = await Wishlist.exists({
       user: userId,

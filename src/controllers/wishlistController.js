@@ -62,6 +62,16 @@ class WishlistController {
   }
 
   // GET /wishlist/check/:productId
+  // GET /wishlist/ids
+  async wishlistIds(req, res) {
+    try {
+      const result = await wishlistService.wishlistIds(req.user._id);
+      return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
   async checkWishlist(req, res) {
     try {
       const result = await wishlistService.checkWishlist(
