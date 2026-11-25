@@ -95,7 +95,7 @@ test("emails escape customer text and show the code / order details", () => {
     shippingAddress: { fullName: "Asha", addressLine1: "12 MG Road", city: "Lucknow", state: "UP", pincode: "226001" },
   };
   const confirmation = templates.orderConfirmationEmail({ order, name: "Asha" });
-  assert.equal(confirmation.subject, "Order confirmed — KRD-20261101-0001");
+  assert.equal(confirmation.subject, "Order placed — KRD-20261101-0001");
   assert.match(confirmation.html, /Weight: 5 kg x 1 Pair/);
   assert.match(confirmation.html, /₹4,498/);
   assert.match(confirmation.html, /https:\/\/kreedum\.example\/account\/orders\/o1/);
@@ -221,7 +221,7 @@ test("order confirmation goes to the customer; a mail failure never throws", asy
 
   assert.equal(await sendOrderConfirmation(order, "u9"), true);
   assert.equal(mailbox[0].to, "asha@gmail.com");
-  assert.equal(mailbox[0].subject, "Order confirmed — KRD-1");
+  assert.equal(mailbox[0].subject, "Order placed — KRD-1");
 
   setTestTransport({ sendMail: async () => { throw new Error("SMTP down"); } });
   const original = console.error;

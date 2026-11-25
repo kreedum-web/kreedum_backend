@@ -52,7 +52,7 @@ test("a phone-only customer gets the order and cancellation emails at the addres
   assert.equal(await sendOrderConfirmation(order({ contactEmail: "ravi@gmail.com" }), "p"), true);
   assert.equal(await sendOrderCancelled(order({ contactEmail: "ravi@gmail.com", orderStatus: "CANCELLED" }), "p"), true);
   assert.deepEqual(mailbox.map((m) => [m.to, m.subject]), [
-    ["ravi@gmail.com", "Order confirmed — KRD-7"],
+    ["ravi@gmail.com", "Order placed — KRD-7"],
     ["ravi@gmail.com", "Order cancelled — KRD-7"],
   ]);
   assert.match(mailbox[1].text, /^Hi Ravi,/); // name from the delivery address
@@ -88,4 +88,25 @@ test("a skipped name is taken from the first delivery address; phone and email o
   assert.deepEqual([users[0].firstName, users[0].lastName, users[0].phone, users[0].email], ["Ravi", "Kumar Singh", "9876543210", undefined]);
   assert.equal(await fillProfileFromAddress("e", { fullName: "Someone Else", phone: "9123456789" }), false);
   assert.deepEqual([users[1].firstName, users[1].phone], ["Asha", ""]);
+});
+
+test("order placed, then confirmed by the store, or cancelled by the store with its reason", () => {
+  const templates = require("../src/emails/templates");
+  const o = { _id: "o1", orderNumber: "KRD-9", items: [{ name: "Yoga Mat", quantity: 2, price: 500, total: 1000 }], pricing: { total: 1000 }, paymentMethod: "COD" };
+
+  const placed = templates.orderPlacedEmail({ order: o, name: "Ravi" });
+  assert.equal(placed.subject, "Order placed — KRD-9");
+  assert.match(placed.text, /confirm it shortly/);
+  assert.doesNotMatch(placed.subject, /confirmed/i);
+
+  const confirmed = templates.orderConfirmedEmail({ order: o, name: "Ravi" });
+  assert.equal(confirmed.subject, "Order confirmed — KRD-9");
+  assert.match(confirmed.html, /Yoga Mat/);
+
+  const byCustomer = templates.orderCancelledEmail({ order: o, name: "Ravi" });
+  assert.match(byCustomer.text, /cancelled as you asked/);
+  const byStore = templates.orderCancelledEmail({ order: o, name: "Ravi", byStore: true, reason: "Out of stock <b>" });
+  assert.match(byStore.text, /we had to cancel your order KRD-9\. Reason: Out of stock/);
+  assert.doesNotMatch(byStore.text, /as you asked/);
+  assert.match(byStore.html, /Out of stock &lt;b&gt;/, "the reason is escaped");
 });

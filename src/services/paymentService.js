@@ -17,7 +17,7 @@ const Order = require("../models/Order");
 const Cart = require("../models/Cart");
 const HttpError = require("../utils/httpError");
 const cashfree = require("../utils/cashfree");
-const { sendOrderConfirmation } = require("./orderEmailService");
+const { sendOrderPlaced } = require("./orderEmailService");
 const { fillProfileFromAddress } = require("./profileFillService");
 
 const PAYMENT_WINDOW_MINUTES = 60;
@@ -174,7 +174,7 @@ async function markPaid(order, payment) {
 
   // First time only: the order is real now.
   await Cart.deleteMany({ user: updated.user });
-  fillProfileFromAddress(updated.user, updated.shippingAddress).then(() => sendOrderConfirmation(updated, updated.user));
+  fillProfileFromAddress(updated.user, updated.shippingAddress).then(() => sendOrderPlaced(updated, updated.user));
   notifications.newOrder(updated);
   return updated;
 }

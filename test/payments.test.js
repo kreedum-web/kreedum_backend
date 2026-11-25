@@ -202,7 +202,7 @@ test("successful payment: order paid once, cart emptied, one confirmation email,
   assert.equal(order.payment.paymentId, "555");
   assert.equal(order.payment.method, "upi");
   assert.deepEqual(cartCleared, [order.user]);
-  assert.equal(mailbox.filter((m) => /Order confirmed/.test(m.subject)).length, 1);
+  assert.equal(mailbox.filter((m) => /Order placed/.test(m.subject)).length, 1);
   assert.match(mailbox[0].text, /Paid online \(upi\)/);
 });
 

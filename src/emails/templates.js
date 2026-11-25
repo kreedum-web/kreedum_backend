@@ -87,8 +87,11 @@ ${codeBlock(code)}
   };
 }
 
-/** After an order is placed. */
-function orderConfirmationEmail({ order, name }) {
+/**
+ * After an order is placed. Not "confirmed" yet: the store checks the stock
+ * first and confirms it in the admin (see orderConfirmedEmail).
+ */
+function orderPlacedEmail({ order, name }) {
   const items = order.items || [];
   const pricing = order.pricing || {};
   const address = order.shippingAddress || {};
@@ -128,11 +131,11 @@ function orderConfirmationEmail({ order, name }) {
   ].filter(Boolean);
 
   return {
-    subject: `Order confirmed — ${order.orderNumber}`,
+    subject: `Order placed — ${order.orderNumber}`,
     html: layout({
-      preheader: `Thank you for your order ${order.orderNumber}. Total ${inr(pricing.total)}.`,
+      preheader: `We've received your order ${order.orderNumber}. We'll confirm it shortly.`,
       body: `<p style="margin:0 0 8px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
-<p style="margin:0 0 18px;">Thank you for shopping with Kreedum Sports! We've received your order and will contact you about delivery.</p>
+<p style="margin:0 0 18px;">Thank you for shopping with Kreedum Sports! We've received your order. Our team is checking availability and will <strong>confirm it shortly</strong>: you'll get another email once it's confirmed.</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:6px;">
 <tr><td style="color:${MUTED};font-size:13px;">Order number</td><td style="text-align:right;font-weight:bold;">${escape(order.orderNumber)}</td></tr>
 ${payment ? `<tr><td style="color:${MUTED};font-size:13px;">Payment</td><td style="text-align:right;">${escape(payment)}</td></tr>` : ""}
@@ -151,7 +154,8 @@ ${orderUrl ? `<p style="margin:24px 0 0;"><a href="${escape(orderUrl)}" style="d
     text: [
       `${name ? `Hi ${name},` : "Hi,"}`,
       "",
-      `Thank you for your order ${order.orderNumber}!`,
+      `Thank you for your order ${order.orderNumber}! We've received it.`,
+      "Our team is checking availability and will confirm it shortly: you'll get another email once it's confirmed.",
       "",
       ...items.map((item) => `- ${item.name}${item.variantLabel ? ` (${item.variantLabel})` : ""}: ${inr(item.price)} x ${item.quantity} = ${inr(item.total)}`),
       "",
@@ -168,8 +172,58 @@ ${orderUrl ? `<p style="margin:24px 0 0;"><a href="${escape(orderUrl)}" style="d
   };
 }
 
-/** The customer cancelled an order. */
-function orderCancelledEmail({ order, name }) {
+const button = (url, label) =>
+  url
+    ? `<p style="margin:22px 0 0;"><a href="${escape(url)}" style="display:inline-block;padding:12px 20px;border-radius:10px;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;">${label}</a></p>`
+    : "";
+
+/** The store checked the stock and confirmed the order (admin). */
+function orderConfirmedEmail({ order, name }) {
+  const items = order.items || [];
+  const pricing = order.pricing || {};
+  const orderUrl = siteUrl() ? `${siteUrl()}/account/orders/${order._id}` : "";
+  const list = items
+    .map(
+      (item) => `<tr>
+<td style="padding:8px 0;border-bottom:1px solid #EEF1F7;">
+  <div style="font-weight:bold;">${escape(item.name)}</div>
+  ${item.variantLabel ? `<div style="font-size:13px;color:${MUTED};">${escape(item.variantLabel)}</div>` : ""}
+</td>
+<td style="padding:8px 0;border-bottom:1px solid #EEF1F7;text-align:right;color:${MUTED};white-space:nowrap;">× ${item.quantity}</td>
+</tr>`
+    )
+    .join("");
+  return {
+    subject: `Order confirmed — ${order.orderNumber}`,
+    html: layout({
+      preheader: `Good news: your order ${order.orderNumber} is confirmed.`,
+      body: `<p style="margin:0 0 8px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
+<p style="margin:0 0 18px;">Good news! Your order <strong>${escape(order.orderNumber)}</strong> is <strong>confirmed</strong>: everything is available and we're getting it ready. We'll let you know when it's on its way.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 12px;">${list}</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="padding:4px 0;font-weight:bold;">Order total</td><td style="padding:4px 0;text-align:right;font-weight:bold;">${inr(pricing.total)}</td></tr>
+</table>
+${button(orderUrl, "View your order")}`,
+    }),
+    text: [
+      `${name ? `Hi ${name},` : "Hi,"}`,
+      "",
+      `Good news! Your order ${order.orderNumber} is confirmed: everything is available and we're getting it ready.`,
+      "We'll let you know when it's on its way.",
+      "",
+      ...items.map((item) => `- ${item.name}${item.variantLabel ? ` (${item.variantLabel})` : ""} x ${item.quantity}`),
+      "",
+      `Order total: ${inr(pricing.total)}`,
+      ...(orderUrl ? ["", `View your order: ${orderUrl}`] : []),
+    ].join("\n"),
+  };
+}
+
+/**
+ * An order was cancelled: by the customer, or by the store (byStore, e.g.
+ * not available), with the store's reason when one was written.
+ */
+function orderCancelledEmail({ order, name, byStore = false, reason = "" }) {
   const items = order.items || [];
   const pricing = order.pricing || {};
   const orderUrl = siteUrl() ? `${siteUrl()}/account/orders/${order._id}` : "";
@@ -190,9 +244,13 @@ function orderCancelledEmail({ order, name }) {
   return {
     subject: `Order cancelled — ${order.orderNumber}`,
     html: layout({
-      preheader: `Your order ${order.orderNumber} has been cancelled.`,
+      preheader: byStore ? `We're sorry: your order ${order.orderNumber} was cancelled.` : `Your order ${order.orderNumber} has been cancelled.`,
       body: `<p style="margin:0 0 8px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
-<p style="margin:0 0 18px;">Your order <strong>${escape(order.orderNumber)}</strong> has been cancelled as you asked. ${
+<p style="margin:0 0 18px;">${
+        byStore
+          ? `We're sorry: we had to cancel your order <strong>${escape(order.orderNumber)}</strong>.${reason ? ` Reason: ${escape(reason)}` : ""}`
+          : `Your order <strong>${escape(order.orderNumber)}</strong> has been cancelled as you asked.`
+      } ${
         paid
           ? "Your full payment is being refunded to the same account or card you paid with. Banks usually take 5–7 working days."
           : "Nothing was charged, so there's nothing to pay."
@@ -201,7 +259,7 @@ function orderCancelledEmail({ order, name }) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="padding:4px 0;color:${MUTED};">Order total</td><td style="padding:4px 0;text-align:right;text-decoration:line-through;color:${MUTED};">${inr(pricing.total)}</td></tr>
 </table>
-<p style="margin:18px 0 0;color:${MUTED};font-size:14px;">Didn't cancel this? ${
+<p style="margin:18px 0 0;color:${MUTED};font-size:14px;">${byStore ? "Questions, or want something similar?" : "Didn't cancel this?"} ${
         siteUrl() ? `<a href="${escape(`${siteUrl()}/contact`)}" style="color:${BLUE};">Contact us</a>` : "Contact us"
       } and we'll help.</p>
 ${orderUrl ? `<p style="margin:20px 0 0;"><a href="${escape(orderUrl)}" style="display:inline-block;padding:12px 20px;border-radius:10px;background:${BLUE};color:#ffffff;text-decoration:none;font-weight:bold;">View order</a></p>` : ""}`,
@@ -209,7 +267,9 @@ ${orderUrl ? `<p style="margin:20px 0 0;"><a href="${escape(orderUrl)}" style="d
     text: [
       `${name ? `Hi ${name},` : "Hi,"}`,
       "",
-      `Your order ${order.orderNumber} has been cancelled as you asked.`,
+      byStore
+        ? `We're sorry: we had to cancel your order ${order.orderNumber}.${reason ? ` Reason: ${reason}` : ""}`
+        : `Your order ${order.orderNumber} has been cancelled as you asked.`,
       paid ? "Your full payment is being refunded to the same account or card you paid with. Banks usually take 5-7 working days." : "Nothing was charged, so there's nothing to pay.",
       "",
       ...items.map((item) => `- ${item.name}${item.variantLabel ? ` (${item.variantLabel})` : ""} x ${item.quantity}`),
@@ -220,4 +280,14 @@ ${orderUrl ? `<p style="margin:20px 0 0;"><a href="${escape(orderUrl)}" style="d
   };
 }
 
-module.exports = { orderCancelledEmail, loginCodeEmail, verificationCodeEmail, passwordResetCodeEmail, orderConfirmationEmail, escape };
+module.exports = {
+  orderPlacedEmail,
+  orderConfirmedEmail,
+  orderCancelledEmail,
+  // older name of orderPlacedEmail
+  orderConfirmationEmail: orderPlacedEmail,
+  loginCodeEmail,
+  verificationCodeEmail,
+  passwordResetCodeEmail,
+  escape,
+};

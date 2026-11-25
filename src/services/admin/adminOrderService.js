@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const Order = require("../../models/Order");
 const HttpError = require("../../utils/httpError");
 const paymentService = require("../paymentService");
-const { sendOrderCancelled } = require("../orderEmailService");
+const { sendOrderCancelled, sendOrderConfirmed } = require("../orderEmailService");
 
 /**
  * Orders in the admin dashboard.
@@ -153,9 +153,11 @@ class AdminOrderService {
       // Paid online: full refund through Cashfree (does nothing for COD).
       await paymentService.refundOrder(order);
     }
+    // Email the customer, in the background (never affects the status change).
+    if (target === "CONFIRMED") sendOrderConfirmed(order, order.user);
     if (target === "CANCELLED") {
-      // Email the customer, in the background.
-      sendOrderCancelled(order, order.user);
+      // The note written in the admin is the reason the customer sees.
+      sendOrderCancelled(order, order.user, { byStore: true, reason: String(note || "").trim().slice(0, 300) });
     }
 
     return this.get(orderId);

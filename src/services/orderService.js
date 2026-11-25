@@ -5,7 +5,7 @@ const Cart = require("../models/Cart");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 const User = require("../models/User");
-const { sendOrderConfirmation, sendOrderCancelled } = require("./orderEmailService");
+const { sendOrderPlaced, sendOrderCancelled } = require("./orderEmailService");
 const { fillProfileFromAddress } = require("./profileFillService");
 const paymentService = require("./paymentService");
 const { cashfreeConfig } = require("../utils/cashfree");
@@ -166,7 +166,7 @@ class OrderService {
       // affect the order): give a new account its name from the delivery
       // address, then email the order confirmation. Online orders get both
       // once the payment succeeds.
-      if (!online) fillProfileFromAddress(userId, payload.shippingAddress).then(() => sendOrderConfirmation(order[0], userId));
+      if (!online) fillProfileFromAddress(userId, payload.shippingAddress).then(() => sendOrderPlaced(order[0], userId));
       // Admin dashboard alert (online orders: once paid, see paymentService).
       if (!online) notifications.newOrder(order[0]);
 
