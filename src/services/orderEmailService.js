@@ -17,7 +17,7 @@ async function recipientFor(order, userId) {
  * block an order action that already happened.
  * @returns {Promise<boolean>} whether it was handed to the mail service
  */
-async function sendOrderEmail(kind, template, order, userId, extra = {}) {
+async function sendOrderEmail(kind, template, order, userId, extra = {}, { throwErrors = false } = {}) {
   try {
     const plain = typeof order.toObject === "function" ? order.toObject() : order;
     const { to, name } = await recipientFor(plain, userId);
@@ -26,9 +26,12 @@ async function sendOrderEmail(kind, template, order, userId, extra = {}) {
       return false;
     }
     const result = await sendMail({ to, ...template({ order: plain, name, ...extra }) });
+    // One line per email in the server log (Render → Logs), to check what went out.
+    if (result?.sent) console.log(`Order ${kind} email sent (${order?.orderNumber}) to ${to} via ${result.via}.`);
     return Boolean(result?.sent);
   } catch (error) {
     console.error(`Order ${kind} email failed (${order?.orderNumber}):`, error.message);
+    if (throwErrors) throw error;
     return false;
   }
 }
@@ -42,6 +45,7 @@ const sendOrderCancelled = (order, userId, { byStore = false, reason = "" } = {}
   sendOrderEmail("cancellation", orderCancelledEmail, order, userId, { byStore, reason });
 
 module.exports = {
+  sendOrderEmail,
   sendOrderPlaced,
   sendOrderConfirmed,
   sendOrderCancelled,

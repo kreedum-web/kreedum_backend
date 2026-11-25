@@ -5,8 +5,18 @@
  * from the chosen variant and never from the product's "from" price.
  */
 
+/**
+ * Sold in versions the customer chooses from (weight, size…). A product with
+ * versions but no options (e.g. a Cockatoo treadmill: Shopify's one hidden
+ * "Default Title" version) has nothing to choose, so it's sold as one item.
+ */
 function hasVariants(product) {
-  return Array.isArray(product?.variants) && product.variants.length > 0;
+  return (
+    Array.isArray(product?.variants) &&
+    product.variants.length > 0 &&
+    Array.isArray(product?.options) &&
+    product.options.some((option) => option?.name && option.values?.length)
+  );
 }
 
 function findVariant(product, variantId) {
@@ -92,6 +102,10 @@ function variantsFromSupplier(sp, sellingPrice) {
       values: (o.values || []).filter((value) => variants.some((v) => v.options[o.name] === value)),
     }))
     .filter((o) => o.name && o.values.length);
+
+  // Versions without options (Shopify's single "Default Title"): nothing to
+  // choose, so the product is sold as one item at its own price.
+  if (!options.length) return { options: [], variants: [], maxPrice: sellingPrice };
 
   return { options, variants, maxPrice: Math.max(...variants.map((v) => v.sellingPrice)) };
 }

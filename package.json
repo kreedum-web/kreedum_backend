@@ -18,6 +18,7 @@
     "content:seed": "node src/migration/seedSiteContent.js",
     "images:folders": "node src/migration/organizeImageFolders.js",
     "gmail:token": "node src/scripts/gmailToken.js",
+    "email:order": "node src/scripts/testOrderEmail.js",
     "brands:apply": "node src/migration/applyBrandRules.js",
     "db:copy-catalog": "node src/scripts/copyCatalog.js",
     "brands:logos": "node src/migration/brandLogos.js",
