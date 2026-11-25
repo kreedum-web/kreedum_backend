@@ -3,7 +3,8 @@ const mongoose = require("mongoose");
 const Order = require("../../models/Order");
 const HttpError = require("../../utils/httpError");
 const paymentService = require("../paymentService");
-const { sendOrderCancelled, sendOrderConfirmed } = require("../orderEmailService");
+const Courier = require("../../models/Courier");
+const { sendOrderCancelled, sendOrderConfirmed, sendOrderStep, sendOrderMessage, recipientFor } = require("../orderEmailService");
 
 /**
  * Orders in the admin dashboard.
@@ -120,11 +121,16 @@ class AdminOrderService {
       order.adminSeenAt = new Date();
       await Order.updateOne({ _id: order._id, adminSeenAt: null }, { $set: { adminSeenAt: order.adminSeenAt } });
     }
-    return { ...order, id: String(order._id), nextStatuses: nextStatuses(order) };
+    const { to } = await recipientFor(order, order.user?._id || order.user).catch(() => ({ to: "" }));
+    return { ...order, id: String(order._id), nextStatuses: nextStatuses(order), customerEmail: to || "" };
   }
 
-  /** Move an order to its next status (see FLOW at the top). */
-  async updateStatus(orderId, { status, note = "" } = {}) {
+  /**
+   * Move an order to its next status (see FLOW at the top) and, unless
+   * notify is false, email the customer. note: the message for the customer
+   * (and the order history). Shipped: courier, trackingId, trackingUrl.
+   */
+  async updateStatus(orderId, { status, note = "", notify = true, courier = "", trackingId = "", trackingUrl = "" } = {}) {
     checkId(orderId);
     const order = await Order.findById(orderId);
     if (!order) throw new HttpError(404, "Order not found.");
@@ -134,11 +140,25 @@ class AdminOrderService {
       throw new HttpError(400, `An order that is ${order.orderStatus} can't be marked ${target || "(empty)"}.`, "BAD_STATUS");
     }
 
+    const message = String(note || "").trim().slice(0, 300);
+    if (target === "SHIPPED") {
+      const found = courier ? await Courier.findOne({ name: String(courier).trim() }).lean() : null;
+      const id = String(trackingId || "").trim().slice(0, 80);
+      let url = String(trackingUrl || "").trim().slice(0, 500);
+      if (url && !/^https?:\/\//i.test(url)) throw new HttpError(400, "The tracking link must start with http:// or https://.");
+      if (!url && id && found?.trackingUrl) url = found.trackingUrl.replace("{id}", encodeURIComponent(id));
+      order.shipment = { courier: String(courier || "").trim().slice(0, 60), trackingId: id, trackingUrl: url, shippedAt: new Date() };
+    }
+
     order.orderStatus = target;
     order.statusHistory.push({
       status: target,
       updatedAt: new Date(),
-      note: String(note || "").trim().slice(0, 300) || STATUS_NOTES[target],
+      note:
+        message ||
+        (target === "SHIPPED" && order.shipment?.courier
+          ? `Shipped with ${order.shipment.courier}${order.shipment.trackingId ? ` (tracking ${order.shipment.trackingId})` : ""}.`
+          : STATUS_NOTES[target]),
     });
     if (!order.adminSeenAt) order.adminSeenAt = new Date();
 
@@ -154,13 +174,87 @@ class AdminOrderService {
       await paymentService.refundOrder(order);
     }
     // Email the customer, in the background (never affects the status change).
-    if (target === "CONFIRMED") sendOrderConfirmed(order, order.user);
-    if (target === "CANCELLED") {
-      // The note written in the admin is the reason the customer sees.
-      sendOrderCancelled(order, order.user, { byStore: true, reason: String(note || "").trim().slice(0, 300) });
+    if (notify !== false) {
+      if (target === "CONFIRMED") sendOrderConfirmed(order, order.user, message);
+      else if (target === "CANCELLED") sendOrderCancelled(order, order.user, { byStore: true, reason: message });
+      else sendOrderStep(order, order.user, target, message);
     }
 
     return this.get(orderId);
+  }
+
+  /** Email the customer about an order: { subject, message }. */
+  async emailCustomer(orderId, { subject = "", message = "" } = {}, admin) {
+    checkId(orderId);
+    const order = await Order.findById(orderId);
+    if (!order) throw new HttpError(404, "Order not found.");
+    const text = String(message).trim();
+    if (text.length < 2) throw new HttpError(400, "Write a message.");
+    if (text.length > 5000) throw new HttpError(400, "The message is too long (max 5,000 characters).");
+    const title = String(subject).trim().slice(0, 150) || `About your order ${order.orderNumber}`;
+
+    const sent = await sendOrderMessage(order, order.user, { subject: title, message: text });
+    if (!sent) throw new HttpError(400, "This customer has no email address (on the order or their account).");
+    order.customerEmails.push({
+      subject: title,
+      message: text,
+      by: [admin?.firstName, admin?.lastName].filter(Boolean).join(" ") || admin?.email || "",
+      at: new Date(),
+    });
+    await order.save();
+    return this.get(orderId);
+  }
+
+  // ---------------------------------------------------------------- couriers
+
+  /** Couriers to ship with (some common ones are added the first time). */
+  async couriers() {
+    if (!(await Courier.exists({}))) {
+      const names = ["Delhivery", "Shiprocket", "Blue Dart", "DTDC", "Ekart", "Xpressbees", "India Post", "Shadowfax", "Porter", "Own delivery (Kreedum)"];
+      await Courier.insertMany(names.map((name, i) => ({ name, displayOrder: (i + 1) * 10 })));
+    }
+    const list = await Courier.find({}).sort({ displayOrder: 1, name: 1 }).lean();
+    return list.map((c) => ({ id: String(c._id), name: c.name, trackingUrl: c.trackingUrl || "", isActive: c.isActive !== false }));
+  }
+
+  #courierFields(body = {}) {
+    const fields = {};
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (name.length < 2 || name.length > 60) throw new HttpError(400, "Courier name: 2 to 60 characters.");
+      fields.name = name;
+    }
+    if (body.trackingUrl !== undefined) {
+      const url = String(body.trackingUrl || "").trim();
+      if (url && !/^https?:\/\/.+\{id\}/i.test(url)) {
+        throw new HttpError(400, "Tracking link: a web address with {id} where the tracking number goes, e.g. https://example.com/track/{id}");
+      }
+      fields.trackingUrl = url;
+    }
+    if (body.isActive !== undefined) fields.isActive = Boolean(body.isActive);
+    return fields;
+  }
+
+  async createCourier(body = {}) {
+    const fields = this.#courierFields(body);
+    if (!fields.name) throw new HttpError(400, "Give the courier a name.");
+    if (await Courier.exists({ name: fields.name })) throw new HttpError(409, `"${fields.name}" is already in the list.`);
+    const last = await Courier.findOne({}).sort({ displayOrder: -1 }).lean();
+    await Courier.create({ ...fields, displayOrder: (last?.displayOrder || 0) + 10 });
+    return this.couriers();
+  }
+
+  async updateCourier(id, body = {}) {
+    checkId(id);
+    const updated = await Courier.findByIdAndUpdate(id, { $set: this.#courierFields(body) }, { new: true });
+    if (!updated) throw new HttpError(404, "Courier not found.");
+    return this.couriers();
+  }
+
+  async deleteCourier(id) {
+    checkId(id);
+    await Courier.deleteOne({ _id: id });
+    return this.couriers();
   }
 
   /**

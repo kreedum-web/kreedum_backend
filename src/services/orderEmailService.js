@@ -1,6 +1,6 @@
 const User = require("../models/User");
 const { sendMail } = require("../utils/mailer");
-const { orderPlacedEmail, orderConfirmedEmail, orderCancelledEmail } = require("../emails/templates");
+const { orderPlacedEmail, orderConfirmedEmail, orderCancelledEmail, orderStepEmail, orderMessageEmail } = require("../emails/templates");
 
 /**
  * Order emails go to the address saved on the order (contactEmail); older
@@ -39,13 +39,24 @@ async function sendOrderEmail(kind, template, order, userId, extra = {}, { throw
 /** Order placed (the store confirms it later). */
 const sendOrderPlaced = (order, userId) => sendOrderEmail("placed", orderPlacedEmail, order, userId);
 /** The store confirmed the order (admin). */
-const sendOrderConfirmed = (order, userId) => sendOrderEmail("confirmed", orderConfirmedEmail, order, userId);
+const sendOrderConfirmed = (order, userId, message = "") =>
+  sendOrderEmail("confirmed", orderConfirmedEmail, order, userId, { message });
 /** Cancelled; { byStore: true, reason } when the store cancelled it. */
 const sendOrderCancelled = (order, userId, { byStore = false, reason = "" } = {}) =>
   sendOrderEmail("cancellation", orderCancelledEmail, order, userId, { byStore, reason });
 
+/** Packed / shipped / out for delivery / delivered / returned, with the team's message. */
+const sendOrderStep = (order, userId, status, message = "") =>
+  sendOrderEmail(status.toLowerCase(), orderStepEmail, order, userId, { status, message });
+/** A message written in the admin (throws, so the admin sees why it failed). */
+const sendOrderMessage = (order, userId, { subject, message }) =>
+  sendOrderEmail("message", orderMessageEmail, order, userId, { subject, message }, { throwErrors: true });
+
 module.exports = {
   sendOrderEmail,
+  sendOrderStep,
+  sendOrderMessage,
+  recipientFor,
   sendOrderPlaced,
   sendOrderConfirmed,
   sendOrderCancelled,

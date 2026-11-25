@@ -235,6 +235,25 @@ const orderSchema = new mongoose.Schema(
       index: true,
     },
 
+    // How it was shipped (set when marked Shipped in the admin).
+    shipment: {
+      courier: { type: String, default: "" }, // "Delhivery"
+      trackingId: { type: String, default: "" },
+      trackingUrl: { type: String, default: "" }, // link to track it
+      shippedAt: { type: Date, default: null },
+    },
+
+    // Emails the team wrote to the customer from the admin.
+    customerEmails: [
+      {
+        subject: String,
+        message: String,
+        by: String,
+        at: { type: Date, default: Date.now },
+        _id: false,
+      },
+    ],
+
     statusHistory: {
       type: [orderStatusHistorySchema],
       default: [{ status: "PENDING" }],

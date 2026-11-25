@@ -107,6 +107,23 @@ router.get("/orders/feed", handle(() => orders.feed()));
 router.post("/orders/seen", handle(() => orders.markAllSeen()));
 router.get("/orders/:id", handle((req) => orders.get(req.params.id)));
 router.patch("/orders/:id/status", handle((req) => orders.updateStatus(req.params.id, req.body)));
+router.post("/orders/:id/email", handle((req) => orders.emailCustomer(req.params.id, req.body, req.user)));
+
+/**
+ * @openapi
+ * /api/v1/admin/orders/{id}/email:
+ *   post: { summary: "Email the customer about an order: { subject, message }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/couriers:
+ *   get: { summary: "Couriers to ship with", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   post: { summary: "Add a courier: { name, trackingUrl (with {id}) }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ * /api/v1/admin/couriers/{id}:
+ *   patch: { summary: "Change a courier: { name, trackingUrl, isActive }", tags: [Admin], security: [{ bearerAuth: [] }] }
+ *   delete: { summary: "Remove a courier", tags: [Admin], security: [{ bearerAuth: [] }] }
+ */
+router.get("/couriers", handle(() => orders.couriers()));
+router.post("/couriers", handle((req) => orders.createCourier(req.body)));
+router.patch("/couriers/:id", handle((req) => orders.updateCourier(req.params.id, req.body)));
+router.delete("/couriers/:id", handle((req) => orders.deleteCourier(req.params.id)));
 
 // ---------------------------------------------------------------- products & brands
 /**

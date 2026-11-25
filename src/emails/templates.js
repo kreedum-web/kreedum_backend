@@ -178,7 +178,7 @@ const button = (url, label) =>
     : "";
 
 /** The store checked the stock and confirmed the order (admin). */
-function orderConfirmedEmail({ order, name }) {
+function orderConfirmedEmail({ order, name, message = "" }) {
   const items = order.items || [];
   const pricing = order.pricing || {};
   const orderUrl = siteUrl() ? `${siteUrl()}/account/orders/${order._id}` : "";
@@ -199,6 +199,7 @@ function orderConfirmedEmail({ order, name }) {
       preheader: `Good news: your order ${order.orderNumber} is confirmed.`,
       body: `<p style="margin:0 0 8px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
 <p style="margin:0 0 18px;">Good news! Your order <strong>${escape(order.orderNumber)}</strong> is <strong>confirmed</strong>: everything is available and we're getting it ready. We'll let you know when it's on its way.</p>
+${message ? `<p style="margin:0 0 18px;padding:10px 14px;border-left:3px solid ${BLUE};background:#F6F8FC;">${escape(message)}</p>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 12px;">${list}</table>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="padding:4px 0;font-weight:bold;">Order total</td><td style="padding:4px 0;text-align:right;font-weight:bold;">${inr(pricing.total)}</td></tr>
@@ -210,12 +211,108 @@ ${button(orderUrl, "View your order")}`,
       "",
       `Good news! Your order ${order.orderNumber} is confirmed: everything is available and we're getting it ready.`,
       "We'll let you know when it's on its way.",
+      ...(message ? ["", message] : []),
       "",
       ...items.map((item) => `- ${item.name}${item.variantLabel ? ` (${item.variantLabel})` : ""} x ${item.quantity}`),
       "",
       `Order total: ${inr(pricing.total)}`,
       ...(orderUrl ? ["", `View your order: ${orderUrl}`] : []),
     ].join("\n"),
+  };
+}
+
+// What each step tells the customer.
+const STEP_TEXT = {
+  PACKED: {
+    subject: "Order packed",
+    headline: "Your order is packed",
+    text: "Your order is packed and ready to go. We'll let you know as soon as it's shipped.",
+  },
+  SHIPPED: {
+    subject: "Order shipped",
+    headline: "Your order is on its way",
+    text: "Good news: your order has been shipped.",
+  },
+  OUT_FOR_DELIVERY: {
+    subject: "Out for delivery",
+    headline: "Your order is out for delivery",
+    text: "Your order is out for delivery and should reach you today. Please keep your phone close: the delivery partner may call.",
+  },
+  DELIVERED: {
+    subject: "Order delivered",
+    headline: "Your order has been delivered",
+    text: "Your order has been delivered. We hope you enjoy it! If anything isn't right, reply to this email or contact us.",
+  },
+  RETURNED: {
+    subject: "Order returned",
+    headline: "Your return is complete",
+    text: "Your order has been marked as returned.",
+  },
+};
+
+/**
+ * Packed, shipped (courier, tracking number and link), out for delivery,
+ * delivered, returned. message: the team's message, when it wrote one.
+ */
+function orderStepEmail({ order, name, status, message = "" }) {
+  const step = STEP_TEXT[status];
+  if (!step) throw new Error(`No email for status ${status}`);
+  const orderUrl = siteUrl() ? `${siteUrl()}/account/orders/${order._id}` : "";
+  const ship = status === "SHIPPED" ? order.shipment || {} : {};
+  const refunded = status === "RETURNED" && order.paymentMethod !== "COD" && order.paymentStatus !== "PENDING";
+  const extra = refunded ? " Your payment is refunded to the same account or card (banks take 5–7 working days)." : "";
+
+  const shipHtml =
+    ship.courier || ship.trackingId
+      ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 6px;background:#F6F8FC;border-radius:10px;">
+<tr><td style="padding:12px 14px;">
+${ship.courier ? `<div><span style="color:${MUTED};">Courier:</span> <strong>${escape(ship.courier)}</strong></div>` : ""}
+${ship.trackingId ? `<div style="margin-top:4px;"><span style="color:${MUTED};">Tracking number:</span> <strong>${escape(ship.trackingId)}</strong></div>` : ""}
+</td></tr></table>${ship.trackingUrl ? button(ship.trackingUrl, "Track your order") : ""}`
+      : "";
+
+  return {
+    subject: `${step.subject} — ${order.orderNumber}`,
+    html: layout({
+      preheader: `${step.headline}: order ${order.orderNumber}.`,
+      body: `<p style="margin:0 0 8px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
+<p style="margin:0 0 6px;font-size:18px;font-weight:bold;">${escape(step.headline)}</p>
+<p style="margin:0 0 14px;">${escape(step.text + extra)} <span style="color:${MUTED};">(Order ${escape(order.orderNumber)})</span></p>
+${message ? `<p style="margin:0 0 14px;padding:10px 14px;border-left:3px solid ${BLUE};background:#F6F8FC;">${escape(message)}</p>` : ""}
+${shipHtml}
+${ship.trackingUrl ? "" : button(orderUrl, "View your order")}`,
+    }),
+    text: [
+      `${name ? `Hi ${name},` : "Hi,"}`,
+      "",
+      `${step.headline} (order ${order.orderNumber}).`,
+      step.text + extra,
+      ...(message ? ["", message] : []),
+      ...(ship.courier ? ["", `Courier: ${ship.courier}`] : []),
+      ...(ship.trackingId ? [`Tracking number: ${ship.trackingId}`] : []),
+      ...(ship.trackingUrl ? [`Track it: ${ship.trackingUrl}`] : []),
+      ...(orderUrl ? ["", `View your order: ${orderUrl}`] : []),
+    ].join("\n"),
+  };
+}
+
+/** A message the team writes to the customer about an order (admin). */
+function orderMessageEmail({ order, name, subject, message }) {
+  const orderUrl = siteUrl() ? `${siteUrl()}/account/orders/${order._id}` : "";
+  const paragraphs = String(message)
+    .split(/\n{2,}/)
+    .map((p) => `<p style="margin:0 0 12px;">${escape(p).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  return {
+    subject,
+    html: layout({
+      preheader: `About your order ${order.orderNumber}`,
+      body: `<p style="margin:0 0 12px;">${name ? `Hi ${escape(name)},` : "Hi,"}</p>
+${paragraphs}
+<p style="margin:16px 0 0;color:${MUTED};font-size:14px;">About your order ${escape(order.orderNumber)}. Reply to this email to answer us.</p>
+${button(orderUrl, "View your order")}`,
+    }),
+    text: [`${name ? `Hi ${name},` : "Hi,"}`, "", String(message), "", `About your order ${order.orderNumber}.`, ...(orderUrl ? [orderUrl] : [])].join("\n"),
   };
 }
 
@@ -284,6 +381,8 @@ module.exports = {
   orderPlacedEmail,
   orderConfirmedEmail,
   orderCancelledEmail,
+  orderStepEmail,
+  orderMessageEmail,
   // older name of orderPlacedEmail
   orderConfirmationEmail: orderPlacedEmail,
   loginCodeEmail,

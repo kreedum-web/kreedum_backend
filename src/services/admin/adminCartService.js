@@ -33,6 +33,7 @@ function linePrice(product, variantId) {
 
 const contactOf = (u) => ({
   id: String(u._id),
+  team: u.role === "admin",
   name: [u.firstName, u.lastName].filter(Boolean).join(" "),
   email: u.email || "",
   phone: u.phone || "",
@@ -60,9 +61,10 @@ class AdminCartService {
       { $sort: { updatedAt: -1 } },
     ]);
 
-    // Customers only (not admins), matching the search.
-    const users = await User.find({ _id: { $in: groups.map((g) => g._id) }, role: { $ne: "admin" } })
-      .select("firstName lastName email phone createdAt")
+    // Everyone with a cart / wishlist, matching the search. Team (admin)
+    // accounts are included, marked "team", so a test cart shows up too.
+    const users = await User.find({ _id: { $in: groups.map((g) => g._id) } })
+      .select("firstName lastName email phone createdAt role")
       .lean();
     const userById = new Map(users.map((u) => [String(u._id), u]));
     const text = String(q || "").trim().toLowerCase();
@@ -127,7 +129,7 @@ class AdminCartService {
   /** One customer's cart, wishlist, orders summary and follow-up notes. */
   async detail(userId) {
     checkId(userId);
-    const user = await User.findById(userId).select("firstName lastName email phone createdAt lastLoginAt").lean();
+    const user = await User.findById(userId).select("firstName lastName email phone createdAt lastLoginAt role").lean();
     if (!user) throw new HttpError(404, "Customer not found.");
 
     const [cart, wishlist, notes, orders] = await Promise.all([
